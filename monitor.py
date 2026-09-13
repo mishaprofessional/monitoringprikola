@@ -3,7 +3,6 @@ import os
 import sys
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from html import escape
@@ -17,8 +16,8 @@ except Exception:
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 CHAT_ID = os.environ.get("CHAT_ID", "")
 
-API_URL = "https://n-api.arizona-rp.com/api/map"   # новый адрес API Arizona
-SERVER_IDS = list(range(1, 34))                     # сервера 1..33
+API_URL = "https://n-api.arizona-rp.com/api/map"
+SERVER_IDS = list(range(1, 34))
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")
 
 EXPIRE_HOURS = 2        # через сколько часов дом "слетит"
@@ -51,7 +50,6 @@ def tg_send(text):
 
 
 def fetch_houses(sid):
-    """Скачивает дома сервера sid. Возвращает список или None при ошибке."""
     try:
         data = http_get_json(f"{API_URL}/{sid}")
     except urllib.error.HTTPError as e:
@@ -63,7 +61,6 @@ def fetch_houses(sid):
 
     houses = data.get("houses") if isinstance(data, dict) else None
     if isinstance(houses, dict):
-        # внутри списки: hasOwner / noOwner и т.п. - собираем все
         items = [h for lst in houses.values() if isinstance(lst, list) for h in lst if isinstance(h, dict)]
     elif isinstance(houses, list):
         items = [h for h in houses if isinstance(h, dict)]
@@ -72,8 +69,8 @@ def fetch_houses(sid):
     return items
 
 
-def is_free(h):
-    """Зелёный дом = нет владельца."""
+def is_free_entry(h):
+    """Свободный, если указан в списке с пустым владельцем."""
     if "isOwned" in h:
         return not bool(h["isOwned"])
     return h.get("owner") in (None, "", "нет", "None")
@@ -134,23 +131,33 @@ def main():
             continue
         ok += 1
 
-        free = [h for h in houses if is_free(h)]
-        free_ids = sorted(h["id"] for h in free)
-        free_map = {h["id"]: h for h in free}
+        cur_ids = sorted(h["id"] for h in houses)
+        free_map = {h["id"]: h for h in houses if is_free_entry(h)}
 
         prev = state.get(str(sid))
-        if not prev or not prev.get("init"):
-            state[str(sid)] = {"init": True, "free": free_ids}
-            print(f"server {sid}: базовый снимок, свободных {len(free_ids)}")
+        if not prev or not prev.get("init") or "ids" not in prev:
+            # базовый снимок: запоминаем занятые и помеченные свободными
+            state[str(sid)] = {"init": True, "ids": cur_ids, "free": sorted(free_map)}
+            print(f"server {sid}: базовый снимок, занятых {len(cur_ids)}, свободных {len(free_map)}")
             continue
 
+        # 1) дом исчез из списка занятых = слетел
+        disappeared = set(prev.get("ids", [])) - set(cur_ids)
+        # 2) дом есть в списке, но с пустым владельцем
+        free_ids_set = set(free_map) | disappeared
+        for i in disappeared:
+            free_map.setdefault(i, {"id": i, "name": ""})
+        if disappeared:
+            print(f"server {sid}: исчезли из списка занятых: {sorted(disappeared)}")
+
+        free_ids = sorted(free_ids_set)
         new_ids = [i for i in free_ids if i not in set(prev.get("free", []))]
         if new_ids:
             print(f"server {sid}: новые свободные {new_ids}")
             notify(sid, [free_map[i] for i in new_ids], datetime.now(MSK))
             time.sleep(1)
 
-        state[str(sid)] = {"init": True, "free": free_ids}
+        state[str(sid)] = {"init": True, "ids": cur_ids, "free": free_ids}
 
     save_state(state)
     print(f"Готово. Серверов отвечают: {ok}/{len(SERVER_IDS)}")
