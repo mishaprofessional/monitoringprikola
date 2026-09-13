@@ -143,8 +143,18 @@ def main():
 
     load_server_names()
     state = load_state()
-    ok = 0
 
+    # одноразовое сообщение-подтверждение, что доставка работает
+    if not state.get("alive_sent"):
+        try:
+            tg_send("✅ Мониторинг Arizona запущен: 33 сервера, проверка каждые 10 минут.\n"
+                    "Сюда будут приходить уведомления о слётах домов.")
+            print("Отправлено приветственное сообщение")
+        except Exception as e:
+            print("Ошибка отправки приветствия:", e)
+        state["alive_sent"] = True
+
+    ok = 0
     for sid in SERVER_IDS:
         houses = None
         for _ in range(3):
