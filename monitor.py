@@ -17,11 +17,13 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 CHAT_ID = os.environ.get("CHAT_ID", "")
 
 API_URL = "https://n-api.arizona-rp.com/api/map"
+SERVERS_URL = "https://n-api.arizona-rp.com/api/servers/arizona"
 SERVER_IDS = list(range(1, 34))
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")
 
-EXPIRE_HOURS = 2        # через сколько часов дом "слетит"
-ROUND_UP_HOUR = False   # True - округлять слет вверх до часа (как в образце)
+EXPIRE_HOURS = 2        # слет = находка + N часов
+ROUND_UP_HOUR = False   # True - округлять слет вверх до часа
+HOUSE_ID_SHIFT = -1     # номера домов на карте сдвинуты относительно id API
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -30,6 +32,8 @@ HEADERS = {
     "Referer": "https://arizona-rp.com/",
     "Origin": "https://arizona-rp.com",
 }
+
+SERVER_NAMES = {}
 
 
 def http_get_json(url, timeout=30):
@@ -47,6 +51,22 @@ def tg_send(text):
     )
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.loads(r.read().decode("utf-8"))
+
+
+def load_server_names():
+    global SERVER_NAMES
+    try:
+        data = http_get_json(SERVERS_URL)
+        items = data if isinstance(data, list) else data.get("servers", data.get("items", []))
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            sid = it.get("serverId") or it.get("id")
+            name = (it.get("name") or it.get("fullName") or "").strip()
+            if sid is not None and name:
+                SERVER_NAMES[int(sid)] = name
+    except Exception as e:
+        print("Список серверов не получен:", e)
 
 
 def fetch_houses(sid):
@@ -70,7 +90,6 @@ def fetch_houses(sid):
 
 
 def is_free_entry(h):
-    """Свободный, если указан в списке с пустым владельцем."""
     if "isOwned" in h:
         return not bool(h["isOwned"])
     return h.get("owner") in (None, "", "нет", "None")
@@ -89,17 +108,22 @@ def save_state(state):
         json.dump(state, f, ensure_ascii=False)
 
 
+def display_id(h):
+    return h.get("id", 0) + HOUSE_ID_SHIFT
+
+
 def notify(sid, new_houses, now):
     deadline = now + timedelta(hours=EXPIRE_HOURS)
     if ROUND_UP_HOUR:
         deadline = (deadline + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+    name = SERVER_NAMES.get(sid, "")
     header = f"🏛 Найдено имущество: {len(new_houses)}"
-    server_line = f"🖥 Сервер: [{sid}]"
+    server_line = f"🖥 Сервер: [{sid}]" + (f" {name}" if name else "")
     times = (f"⚪ Найдено: {now.strftime('%d.%m %H:%M')}\n"
              f"⌛ Слет: {deadline.strftime('%d.%m %H:%M')}")
     block_lines = [f"🏠 ДОМА ({len(new_houses)})"]
     for h in new_houses:
-        line = f"#{h.get('id')}"
+        line = f"#{display_id(h)}"
         title = (h.get("name") or "").strip()
         if title:
             line += f" - {title}"
@@ -117,6 +141,7 @@ def main():
         print("Не заданы BOT_TOKEN / CHAT_ID в Secrets")
         sys.exit(1)
 
+    load_server_names()
     state = load_state()
     ok = 0
 
@@ -136,24 +161,25 @@ def main():
 
         prev = state.get(str(sid))
         if not prev or not prev.get("init") or "ids" not in prev:
-            # базовый снимок: запоминаем занятые и помеченные свободными
             state[str(sid)] = {"init": True, "ids": cur_ids, "free": sorted(free_map)}
             print(f"server {sid}: базовый снимок, занятых {len(cur_ids)}, свободных {len(free_map)}")
             continue
 
-        # 1) дом исчез из списка занятых = слетел
         disappeared = set(prev.get("ids", [])) - set(cur_ids)
-        # 2) дом есть в списке, но с пустым владельцем
-        free_ids_set = set(free_map) | disappeared
+        if len(disappeared) > 50:
+            print(f"server {sid}: массовые изменения ({len(disappeared)}), переснимаю снимок без уведомлений")
+            state[str(sid)] = {"init": True, "ids": cur_ids, "free": sorted(free_map)}
+            continue
+
         for i in disappeared:
             free_map.setdefault(i, {"id": i, "name": ""})
         if disappeared:
             print(f"server {sid}: исчезли из списка занятых: {sorted(disappeared)}")
 
-        free_ids = sorted(free_ids_set)
+        free_ids = sorted(free_map)
         new_ids = [i for i in free_ids if i not in set(prev.get("free", []))]
         if new_ids:
-            print(f"server {sid}: новые свободные {new_ids}")
+            print(f"server {sid}: новые свободные {[display_id(free_map[i]) for i in new_ids]}")
             notify(sid, [free_map[i] for i in new_ids], datetime.now(MSK))
             time.sleep(1)
 
