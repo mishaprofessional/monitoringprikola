@@ -17,8 +17,8 @@ except Exception:
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 CHAT_ID = os.environ.get("CHAT_ID", "")
 
-API_URL = "https://backend.arizona-rp.com/map"
-SERVERS_URL = "https://backend.arizona-rp.com/server/get-all"
+API_URL = "https://n-api.arizona-rp.com/api/map"   # новый адрес API Arizona
+SERVER_IDS = list(range(1, 34))                     # сервера 1..33
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")
 
 EXPIRE_HOURS = 2        # через сколько часов дом "слетит"
@@ -32,12 +32,8 @@ HEADERS = {
     "Origin": "https://arizona-rp.com",
 }
 
-SERVER_NAMES = {}
 
-
-def http_get_json(url, params=None, timeout=30):
-    if params:
-        url += "?" + urllib.parse.urlencode(params)
+def http_get_json(url, timeout=30):
     req = urllib.request.Request(url, headers=HEADERS)
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode("utf-8"))
@@ -54,7 +50,30 @@ def tg_send(text):
         return json.loads(r.read().decode("utf-8"))
 
 
+def fetch_houses(sid):
+    """Скачивает дома сервера sid. Возвращает список или None при ошибке."""
+    try:
+        data = http_get_json(f"{API_URL}/{sid}")
+    except urllib.error.HTTPError as e:
+        print(f"server {sid}: HTTP {e.code}")
+        return None
+    except Exception as e:
+        print(f"server {sid}: error {e}")
+        return None
+
+    houses = data.get("houses") if isinstance(data, dict) else None
+    if isinstance(houses, dict):
+        # внутри списки: hasOwner / noOwner и т.п. - собираем все
+        items = [h for lst in houses.values() if isinstance(lst, list) for h in lst if isinstance(h, dict)]
+    elif isinstance(houses, list):
+        items = [h for h in houses if isinstance(h, dict)]
+    else:
+        items = []
+    return items
+
+
 def is_free(h):
+    """Зелёный дом = нет владельца."""
     if "isOwned" in h:
         return not bool(h["isOwned"])
     return h.get("owner") in (None, "", "нет", "None")
@@ -73,50 +92,18 @@ def save_state(state):
         json.dump(state, f, ensure_ascii=False)
 
 
-def fetch_servers():
-    global SERVER_NAMES
-    try:
-        items = http_get_json(SERVERS_URL)
-        ids, names = [], {}
-        for it in items:
-            sid = it.get("serverId") or it.get("id")
-            name = (it.get("name") or "").strip()
-            if not sid or "mobile" in name.lower():
-                continue
-            ids.append(int(sid))
-            names[int(sid)] = name
-        if ids:
-            SERVER_NAMES = names
-            return sorted(ids)
-    except Exception as e:
-        print("Список серверов не получен:", e)
-    return list(range(1, 34))
-
-
-def fetch_houses(sid):
-    try:
-        return http_get_json(API_URL, {"serverId": sid}).get("houses", [])
-    except urllib.error.HTTPError as e:
-        print(f"server {sid}: HTTP {e.code}")
-        return None
-    except Exception as e:
-        print(f"server {sid}: error {e}")
-        return None
-
-
 def notify(sid, new_houses, now):
     deadline = now + timedelta(hours=EXPIRE_HOURS)
     if ROUND_UP_HOUR:
         deadline = (deadline + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
-    name = SERVER_NAMES.get(sid, "")
     header = f"🏛 Найдено имущество: {len(new_houses)}"
-    server_line = f"🖥 Сервер: [{sid}]" + (f" {name}" if name else "")
+    server_line = f"🖥 Сервер: [{sid}]"
     times = (f"⚪ Найдено: {now.strftime('%d.%m %H:%M')}\n"
              f"⌛ Слет: {deadline.strftime('%d.%m %H:%M')}")
     block_lines = [f"🏠 ДОМА ({len(new_houses)})"]
     for h in new_houses:
         line = f"#{h.get('id')}"
-        title = h.get("name") or h.get("title") or ""
+        title = (h.get("name") or "").strip()
         if title:
             line += f" - {title}"
         block_lines.append(line)
@@ -134,10 +121,9 @@ def main():
         sys.exit(1)
 
     state = load_state()
-    servers = fetch_servers()
     ok = 0
 
-    for sid in servers:
+    for sid in SERVER_IDS:
         houses = None
         for _ in range(3):
             houses = fetch_houses(sid)
@@ -167,7 +153,7 @@ def main():
         state[str(sid)] = {"init": True, "free": free_ids}
 
     save_state(state)
-    print(f"Готово. Серверов отвечают: {ok}/{len(servers)}")
+    print(f"Готово. Серверов отвечают: {ok}/{len(SERVER_IDS)}")
 
 
 if __name__ == "__main__":
