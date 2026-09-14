@@ -352,8 +352,8 @@ def ct(sid, items, now, kind):
     q = "<blockquote color=\"CLRPH\">"
     text = (f"{q}<code>{escape(head)}</code></blockquote>\n"
             f"{q}<code>Сервер:</code> <b>{escape(srv)}</b></blockquote>\n"
-            f"{q}<code>Обнаружено:</code> <b>{t1}</b> <b>{d1}</b>\n"
-            f"<code>Слет:</code> <b>{t2}</b> <b>{d2}</b></blockquote>\n"
+            f"{q}<code>Обнаружено:</code> <b>{t1}</b> <tg-spoiler>{d1}</tg-spoiler>\n"
+            f"<code>Слет:</code> <b>{t2}</b> <tg-spoiler>{d2}</tg-spoiler></blockquote>\n"
             f"<pre>{escape(chr(10).join(block))}</pre>")
     text = text.replace("0", "<b>O</b>")
     return text.replace("CLRPH", QCOLOR)
@@ -367,22 +367,22 @@ def nt(chats, sid, h_items, b_items, now):
         text = ct(sid, items, now, kind)
         plain = text.replace(f" color=\"{QCOLOR}\"", "")
         img = bm(items, sid, kind)
-        combined = img is not None and len(text) <= CL
         for chat in chats:
+            if img:
+                try:
+                    pp(chat, img, "")
+                except Exception as e:
+                    print("send:", e)
             ok_sent = False
             for variant in (text, plain):
                 try:
-                    if combined:
-                        pp(chat, img, variant, parse_mode="HTML")
-                    else:
-                        ps(chat, variant)
+                    ps(chat, variant)
                     ok_sent = True
                     break
                 except Exception as e:
                     print("send:", e)
-            if not ok_sent and img and combined:
+            if not ok_sent and img:
                 try:
-                    ps(chat, plain)
                     pp(chat, img, f"📍 Сервер [{sid:02d}] {name}")
                 except Exception as e:
                     print("send:", e)
