@@ -1,4 +1,3 @@
-import io
 import json
 import os
 import sys
@@ -26,7 +25,6 @@ CHAT_ID = os.environ.get("CHAT_ID", "")
 
 API_URL = "https://n-api.arizona-rp.com/api/map"
 SERVERS_URL = "https://n-api.arizona-rp.com/api/servers/arizona"
-TILE_URL = "https://rod-pc.react-group.tech/resource/web/arizona/map_dark/2/{x}/{y}.png"
 SERVER_IDS = list(range(1, 34))
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")
 SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
@@ -36,10 +34,7 @@ HOUSE_ID_SHIFT = -1
 MAX_LIST_IN_MSG = 60
 ANOMALY_LIMIT = 200
 FREE_KEYS = ("noOwner", "onMarketplace")
-
-# калибровка: игровые координаты -> тайл-координаты зума 2 (в тайлах)
-MX, CX = 0.00039469, 1.68917
-MY, CY = 0.00039487, 1.51705
+MAP_BOUND = 3000.0   # игровые координаты примерно от -3000 до 3000
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -201,54 +196,40 @@ def display_id(h):
     return h.get("id", 0) + HOUSE_ID_SHIFT
 
 
-def game_to_px(lx, ly):
-    return (MX * lx + CX) * 256.0, (CY - MY * ly) * 256.0
-
-
-def build_map_image(houses, cache):
-    """Склеивает overview-карту из 16 тайлов и вырезает кадр 512x512 с метками."""
+def build_radar_image(houses, sid):
     if not HAS_PIL:
         return None
     try:
-        if "img" not in cache:
-            tiles = {}
-            for ty in range(4):
-                for tx in range(4):
-                    try:
-                        req = urllib.request.Request(TILE_URL.format(x=tx, y=ty), headers=HEADERS)
-                        with urllib.request.urlopen(req, timeout=30) as r:
-                            tiles[(tx, ty)] = Image.open(io.BytesIO(r.read())).convert("RGB")
-                    except Exception:
-                        tiles[(tx, ty)] = Image.new("RGB", (256, 256), (24, 26, 32))
-            big = Image.new("RGB", (1024, 1024))
-            for (tx, ty), im in tiles.items():
-                big.paste(im, (tx * 256, ty * 256))
-            cache["img"] = big
-        big = cache["img"]
-
-        pts = [game_to_px(h.get("lx", 0), h.get("ly", 0)) for h in houses]
-        cx = sum(p[0] for p in pts) / len(pts)
-        cy = sum(p[1] for p in pts) / len(pts)
-        left = min(max(cx - 256, 0), 512)
-        top = min(max(cy - 256, 0), 512)
-        crop = big.crop((int(left), int(top), int(left) + 512, int(top) + 512))
-        d = ImageDraw.Draw(crop)
-        for (px, py), h in zip(pts, houses):
-            mx, my = px - left, py - top
-            d.ellipse([mx - 10, my - 10, mx + 10, my + 10], outline=(255, 60, 60), width=3)
-            d.ellipse([mx - 3, my - 3, mx + 3, my + 3], fill=(255, 60, 60))
-            label = f"#{display_id(h)}"
-            d.rectangle([mx + 12, my - 26, mx + 12 + 7 * len(label) + 6, my - 8], fill=(0, 0, 0))
-            d.text((mx + 15, my - 24), label, fill=(255, 255, 255))
-        path = os.path.join(tempfile.gettempdir(), "arz_map.png")
-        crop.save(path)
+        S = 512
+        img = Image.new("RGB", (S, S), (16, 18, 24))
+        d = ImageDraw.Draw(img)
+        for i in range(1, 8):
+            p = i * S / 8
+            d.line([(p, 0), (p, S)], fill=(30, 34, 42))
+            d.line([(0, p), (S, p)], fill=(30, 34, 42))
+        for r in (80, 160, 240):
+            d.ellipse([S / 2 - r, S / 2 - r, S / 2 + r, S / 2 + r], outline=(28, 32, 40))
+        for h in houses:
+            lx = h.get("lx", 0)
+            ly = h.get("ly", 0)
+            x = min(max((lx + MAP_BOUND) / (2 * MAP_BOUND) * S, 8), S - 8)
+            y = min(max((MAP_BOUND - ly) / (2 * MAP_BOUND) * S, 8), S - 8)
+            d.ellipse([x - 10, y - 10, x + 10, y + 10], outline=(255, 60, 60), width=3)
+            d.ellipse([x - 3, y - 3, x + 3, y + 3], fill=(255, 60, 60))
+            lab = f"#{display_id(h)}"
+            d.rectangle([x + 12, y - 26, x + 12 + 7 * len(lab) + 6, y - 8], fill=(0, 0, 0))
+            d.text((x + 15, y - 24), lab, fill=(255, 255, 255))
+        d.text((10, 8), f"[{sid:02d}] {SERVER_NAMES.get(sid, '')}", fill=(140, 150, 165))
+        d.text((10, S - 22), "схема: позиция дома на карте сервера", fill=(90, 98, 110))
+        path = os.path.join(tempfile.gettempdir(), "arz_radar.png")
+        img.save(path)
         return path
     except Exception as e:
-        print("Ошибка сборки карты:", e)
+        print("Ошибка сборки схемы:", e)
         return None
 
 
-def notify(chats, sid, new_houses, now, cache):
+def notify(chats, sid, new_houses, now):
     deadline = expire_time(now)
     name = SERVER_NAMES.get(sid, "")
     total = len(new_houses)
@@ -268,7 +249,7 @@ def notify(chats, sid, new_houses, now, cache):
         block_lines.append(f"… и ещё {total - len(shown)}")
     text = (f"{header}\n\n{server_line}\n\n{times}\n\n"
             f"<pre>{escape(chr(10).join(block_lines))}</pre>")
-    img = build_map_image(new_houses, cache)
+    img = build_radar_image(new_houses, sid)
     for chat in chats:
         try:
             tg_send(chat, text)
@@ -276,7 +257,7 @@ def notify(chats, sid, new_houses, now, cache):
             print("Ошибка отправки:", e)
         if img:
             try:
-                tg_send_photo(chat, img, f"📍 Сервер [{sid:02d}] {name}: дом на карте")
+                tg_send_photo(chat, img, f"📍 Сервер [{sid:02d}] {name}: позиция дома")
             except Exception as e:
                 print("Ошибка отправки фото:", e)
         time.sleep(1)
@@ -290,7 +271,6 @@ def main():
     load_server_names()
     state = load_state()
     allowed = load_allowed()
-    cache = {}
     ok = 0
 
     for sid in SERVER_IDS:
@@ -316,7 +296,7 @@ def main():
         elif new_ids:
             if allowed:
                 print(f"server {sid}: новые свободные {[display_id(free_map[i]) for i in new_ids]}")
-                notify(allowed, sid, [free_map[i] for i in new_ids], datetime.now(MSK), cache)
+                notify(allowed, sid, [free_map[i] for i in new_ids], datetime.now(MSK))
             else:
                 print(f"server {sid}: новые свободные, но нет активированных пользователей")
 
