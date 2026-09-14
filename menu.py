@@ -126,12 +126,42 @@ def main():
                                  "since": (r or {}).get("since", "данных нет")}
                             info[str(cid)] = r
                     if r and r.get("name"):
-                        lines.append(f"• {r['name']} — доступ с {r['since']}")
+                        lines.append(f"• {r['name']} — id {cid}, доступ с {r['since']}")
                     else:
                         lines.append(f"• id {cid} (не удалось получить профиль)")
                 if not lines:
                     lines.append("Пока никого.")
                 tg_send(chat_id, "🔑 У кого есть доступ:\n" + "\n".join(lines))
+            else:
+                tg_send(chat_id, LOCK_TEXT)
+            continue
+
+        if text.startswith(("/revoke", "/ban", "/kick")):
+            if owner is not None and chat_id == owner:
+                arg = text.split(None, 1)[1].strip() if " " in text else ""
+                if not arg:
+                    tg_send(chat_id, "Как пользоваться: /revoke <id> или /revoke @юзернейм")
+                else:
+                    target = None
+                    if arg.lstrip("-").isdigit():
+                        target = int(arg)
+                    else:
+                        needle = arg.lstrip("@").lower()
+                        info = settings.get("allowed_info", {})
+                        for cid in sorted(allowed):
+                            nm = ((info.get(str(cid)) or {}).get("name") or "").lower()
+                            if needle and (f"@{needle}" in nm or nm.startswith(needle)):
+                                target = cid
+                                break
+                    if target is not None and target in allowed:
+                        allowed.discard(target)
+                        info = settings.setdefault("allowed_info", {})
+                        rec = info.pop(str(target), None)
+                        nm = (rec or {}).get("name") or f"id {target}"
+                        tg_send(chat_id, f"🚫 Доступ отозван: {nm}")
+                        tg_send(target, "🚫 Доступ к боту отозван владельцем.")
+                    else:
+                        tg_send(chat_id, "😕 Не нашёл такого среди имеющих доступ. Список: /who")
             else:
                 tg_send(chat_id, LOCK_TEXT)
             continue
