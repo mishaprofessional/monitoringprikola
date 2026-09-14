@@ -39,6 +39,7 @@ FK = ("noOwner", "onMarketplace")
 MB = 3000.0
 CL = 1024
 BL = ("нефтевышка",)
+QCOLOR = "7856F0"
 HD = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
@@ -339,7 +340,7 @@ def ct(sid, items, now, kind):
         head = ("🏦 Найден бизнес" if total == 1 else "🏬 Найдено несколько бизнесов").upper()
         block = [f"💼 БИЗНЕСЫ (Количество: {total})"]
         for it in shown:
-            t = (it.get("name") or "").strip() or f"#{it.get('id', 0)}"
+            t = (it.get("name") or "").strip() or f"#{it.get('id", 0)}"
             block.append(t)
     if total > len(shown):
         block.append(f"… и ещё {total - len(shown)}")
@@ -348,12 +349,14 @@ def ct(sid, items, now, kind):
     d1 = now.strftime("%d.%m.%Y")
     t2 = deadline.strftime("%H:%M")
     d2 = deadline.strftime("%d.%m.%Y")
-    text = (f"<blockquote><code>{escape(head)}</code></blockquote>\n"
-            f"<blockquote><code>Сервер:</code> <b>{escape(srv)}</b></blockquote>\n"
-            f"<blockquote><code>Обнаружено:</code> <b>{t1}</b> <tg-spoiler>{d1}</tg-spoiler>\n"
+    q = "<blockquote color=\"CLRPH\"> "
+    text = (f"{q}<code>{escape(head)}</code></blockquote>\n"
+            f"{q}<code>Сервер:</code> <b>{escape(srv)}</b></blockquote>\n"
+            f"{q}<code>Обнаружено:</code> <b>{t1}</b> <tg-spoiler>{d1}</tg-spoiler>\n"
             f"<code>Слет:</code> <b>{t2}</b> <tg-spoiler>{d2}</tg-spoiler></blockquote>\n"
             f"<pre>{escape(chr(10).join(block))}</pre>")
-    return text.replace("0", "<b>O</b>")
+    text = text.replace("0", "<b>O</b>")
+    return text.replace("CLRPH", QCOLOR)
 
 
 def nt(chats, sid, h_items, b_items, now):
@@ -362,18 +365,27 @@ def nt(chats, sid, h_items, b_items, now):
             continue
         name = NM.get(sid, "")
         text = ct(sid, items, now, kind)
+        plain = text.replace(f" color=\"{QCOLOR}\"", "")
         img = bm(items, sid, kind)
         combined = img is not None and len(text) <= CL
         for chat in chats:
-            try:
-                if combined:
-                    pp(chat, img, text, parse_mode="HTML")
-                else:
-                    ps(chat, text)
-                    if img:
-                        pp(chat, img, f"📍 Сервер [{sid:02d}] {name}")
-            except Exception as e:
-                print("send:", e)
+            ok_sent = False
+            for variant in (text, plain):
+                try:
+                    if combined:
+                        pp(chat, img, variant, parse_mode="HTML")
+                    else:
+                        ps(chat, variant)
+                    ok_sent = True
+                    break
+                except Exception as e:
+                    print("send:", e)
+            if not ok_sent and img and combined:
+                try:
+                    ps(chat, plain)
+                    pp(chat, img, f"📍 Сервер [{sid:02d}] {name}")
+                except Exception as e:
+                    print("send:", e)
             time.sleep(1)
 
 
