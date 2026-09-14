@@ -26,15 +26,17 @@ CHAT_ID = os.environ.get("CHAT_ID", "")
 API_URL = "https://n-api.arizona-rp.com/api/map"
 SERVERS_URL = "https://n-api.arizona-rp.com/api/servers/arizona"
 SERVER_IDS = list(range(1, 34))
-STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")
-SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+STATE_FILE = os.path.join(BASE_DIR, "state.json")
+SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
+MAP_FILE = os.path.join(BASE_DIR, "map.png")
 
 EXPIRE_HOURS = 3
 HOUSE_ID_SHIFT = -1
 MAX_LIST_IN_MSG = 60
 ANOMALY_LIMIT = 200
 FREE_KEYS = ("noOwner", "onMarketplace")
-MAP_BOUND = 3000.0   # игровые координаты примерно от -3000 до 3000
+MAP_BOUND = 3000.0
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -196,36 +198,42 @@ def display_id(h):
     return h.get("id", 0) + HOUSE_ID_SHIFT
 
 
-def build_radar_image(houses, sid):
+def build_map_image(houses, sid):
     if not HAS_PIL:
         return None
     try:
-        S = 512
-        img = Image.new("RGB", (S, S), (16, 18, 24))
-        d = ImageDraw.Draw(img)
-        for i in range(1, 8):
-            p = i * S / 8
-            d.line([(p, 0), (p, S)], fill=(30, 34, 42))
-            d.line([(0, p), (S, p)], fill=(30, 34, 42))
-        for r in (80, 160, 240):
-            d.ellipse([S / 2 - r, S / 2 - r, S / 2 + r, S / 2 + r], outline=(28, 32, 40))
+        if os.path.exists(MAP_FILE):
+            base = Image.open(MAP_FILE).convert("RGB")
+            base = base.resize((640, max(1, int(640 * base.height / base.width))))
+        else:
+            base = Image.new("RGB", (512, 512), (16, 18, 24))
+            d0 = ImageDraw.Draw(base)
+            for i in range(1, 8):
+                p = i * 512 / 8
+                d0.line([(p, 0), (p, 512)], fill=(30, 34, 42))
+                d0.line([(0, p), (512, p)], fill=(30, 34, 42))
+            for r in (80, 160, 240):
+                d0.ellipse([256 - r, 256 - r, 256 + r, 256 + r], outline=(28, 32, 40))
+        d = ImageDraw.Draw(base)
+        W, H = base.size
         for h in houses:
             lx = h.get("lx", 0)
             ly = h.get("ly", 0)
-            x = min(max((lx + MAP_BOUND) / (2 * MAP_BOUND) * S, 8), S - 8)
-            y = min(max((MAP_BOUND - ly) / (2 * MAP_BOUND) * S, 8), S - 8)
-            d.ellipse([x - 10, y - 10, x + 10, y + 10], outline=(255, 60, 60), width=3)
-            d.ellipse([x - 3, y - 3, x + 3, y + 3], fill=(255, 60, 60))
+            x = min(max((lx + MAP_BOUND) / (2 * MAP_BOUND) * W, 8), W - 8)
+            y = min(max((MAP_BOUND - ly) / (2 * MAP_BOUND) * H, 8), H - 8)
+            d.ellipse([x - 10, y - 10, x + 10, y + 10], outline=(255, 40, 40), width=3)
+            d.ellipse([x - 3, y - 3, x + 3, y + 3], fill=(255, 40, 40))
             lab = f"#{display_id(h)}"
             d.rectangle([x + 12, y - 26, x + 12 + 7 * len(lab) + 6, y - 8], fill=(0, 0, 0))
             d.text((x + 15, y - 24), lab, fill=(255, 255, 255))
-        d.text((10, 8), f"[{sid:02d}] {SERVER_NAMES.get(sid, '')}", fill=(140, 150, 165))
-        d.text((10, S - 22), "схема: позиция дома на карте сервера", fill=(90, 98, 110))
-        path = os.path.join(tempfile.gettempdir(), "arz_radar.png")
-        img.save(path)
+        head = f"[{sid:02d}] {SERVER_NAMES.get(sid, '')}"
+        d.rectangle([6, 6, 6 + 7 * len(head) + 8, 26], fill=(0, 0, 0))
+        d.text((10, 9), head, fill=(255, 255, 255))
+        path = os.path.join(tempfile.gettempdir(), "arz_map.png")
+        base.save(path)
         return path
     except Exception as e:
-        print("Ошибка сборки схемы:", e)
+        print("Ошибка сборки карты:", e)
         return None
 
 
@@ -249,7 +257,7 @@ def notify(chats, sid, new_houses, now):
         block_lines.append(f"… и ещё {total - len(shown)}")
     text = (f"{header}\n\n{server_line}\n\n{times}\n\n"
             f"<pre>{escape(chr(10).join(block_lines))}</pre>")
-    img = build_radar_image(new_houses, sid)
+    img = build_map_image(new_houses, sid)
     for chat in chats:
         try:
             tg_send(chat, text)
