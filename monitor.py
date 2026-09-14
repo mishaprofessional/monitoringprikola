@@ -327,8 +327,8 @@ def ct(sid, items, now, kind):
     total = len(items)
     shown = items[:ML]
     if kind == "h":
-        head = "🏠 Найден дом" if total == 1 else "🏘 Найдено несколько домов"
-        block = [f"🏠 ДОМА ({total})"]
+        head = ("🏠 Найден дом" if total == 1 else "🏘 Найдено несколько домов").upper()
+        block = [f"🏠 ДОМА (Количество: {total})"]
         for it in shown:
             line = f"#{di(it)}"
             t = (it.get("name") or "").strip()
@@ -336,17 +336,24 @@ def ct(sid, items, now, kind):
                 line += f" - {t}"
             block.append(line)
     else:
-        head = "🏦 Найден бизнес" if total == 1 else "🏬 Найдено несколько бизнесов"
-        block = [f"💼 БИЗНЕСЫ ({total})"]
+        head = ("🏦 Найден бизнес" if total == 1 else "🏬 Найдено несколько бизнесов").upper()
+        block = [f"💼 БИЗНЕСЫ (Количество: {total})"]
         for it in shown:
             t = (it.get("name") or "").strip() or f"#{it.get('id', 0)}"
             block.append(t)
     if total > len(shown):
         block.append(f"… и ещё {total - len(shown)}")
-    return (f"{head}\n\n💾 Сервер: [{sid:02d}]" + (f" {name}" if name else "") +
-            f"\n\n📷 Обнаружено: {now.strftime('%d.%m.%Y %H:%M')}\n"
-            f"📆 Слет: {deadline.strftime('%d.%m.%Y %H:%M')}\n\n"
+    srv = f"[{sid:02d}]" + (f" {name}" if name else "")
+    t1 = now.strftime("%H:%M")
+    d1 = now.strftime("%d.%m.%Y")
+    t2 = deadline.strftime("%H:%M")
+    d2 = deadline.strftime("%d.%m.%Y")
+    text = (f"<blockquote><code>{escape(head)}</code></blockquote>\n"
+            f"<blockquote><code>Сервер: <b>{escape(srv)}</b></code></blockquote>\n"
+            f"<blockquote><code>Обнаружено: <b>{t1}</b> <tg-spoiler>{d1}</tg-spoiler>\n"
+            f"Слет: <b>{t2}</b> <tg-spoiler>{d2}</tg-spoiler></code></blockquote>\n"
             f"<pre>{escape(chr(10).join(block))}</pre>")
+    return text.replace("0", "<b>O</b>")
 
 
 def nt(chats, sid, h_items, b_items, now):
