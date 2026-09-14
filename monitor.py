@@ -352,8 +352,8 @@ def ct(sid, items, now, kind):
     q = "<blockquote color=\"CLRPH\">"
     text = (f"{q}<code>{escape(head)}</code></blockquote>\n"
             f"{q}<code>Сервер:</code> <b>{escape(srv)}</b></blockquote>\n"
-            f"{q}<code>Обнаружено:</code> <b>{t1}</b> <tg-spoiler>{d1}</tg-spoiler>\n"
-            f"<code>Слет:</code> <b>{t2}</b> <tg-spoiler>{d2}</tg-spoiler></blockquote>\n"
+            f"{q}<code>Обнаружено:</code> <b>{t1}</b> <b>{d1}</b>\n"
+            f"<code>Слет:</code> <b>{t2}</b> <b>{d2}</b></blockquote>\n"
             f"<pre>{escape(chr(10).join(block))}</pre>")
     text = text.replace("0", "<b>O</b>")
     return text.replace("CLRPH", QCOLOR)
