@@ -142,6 +142,18 @@ def pp(chat_id, path, caption, parse_mode=None):
         return json.loads(r.read().decode("utf-8"))
 
 
+def wb(o, out):
+    if isinstance(o, dict):
+        if "lx" in o and "owner" in o:
+            out.append(o)
+        else:
+            for v in o.values():
+                wb(v, out)
+    elif isinstance(o, list):
+        for v in o:
+            wb(v, out)
+
+
 def fd(sid):
     try:
         data = gj(f"{SRC}/{sid}")
@@ -154,7 +166,7 @@ def fd(sid):
 
     houses = data.get("houses") if isinstance(data, dict) else None
     if not isinstance(houses, dict):
-        return {"free": [], "occupied": 0}
+        return {"free": [], "biz": [], "occupied": 0}
 
     free = []
     for key in FK:
@@ -167,7 +179,12 @@ def fd(sid):
         occupied = len(lst)
     else:
         occupied = 0
-    return {"free": free, "occupied": occupied}
+
+    biz_all = []
+    wb(data.get("businesses"), biz_all)
+    biz = [b for b in biz_all if isinstance(b, dict) and "id" in b
+           and not (b.get("owner") or "").strip()]
+    return {"free": free, "biz": biz, "occupied": occupied}
 
 
 def et(now):
@@ -213,7 +230,7 @@ def gf(size):
     return ImageFont.load_default()
 
 
-def bm(houses, sid):
+def bm(items, sid, kind):
     if not HAS_PIL:
         return None
     try:
@@ -233,20 +250,26 @@ def bm(houses, sid):
         W, H = base.size
         f_head = gf(max(14, W // 44))
         f_lab = gf(max(12, W // 50))
-        r_dot = max(4, W // 140)
-        for h in houses:
-            lx = h.get("lx", 0)
-            ly = h.get("ly", 0)
+        r_dot = max(3, W // 180)
+        col = (255, 30, 30) if kind == "h" else (60, 220, 90)
+        for it in items:
+            lx = it.get("lx", 0)
+            ly = it.get("ly", 0)
             x = min(max((lx + MB) / (2 * MB) * W, 8), W - 8)
             y = min(max((MB - ly) / (2 * MB) * H, 8), H - 8)
-            d.ellipse([x - r_dot, y - r_dot, x + r_dot, y + r_dot], fill=(255, 30, 30))
-            lab = str(di(h))
+            d.ellipse([x - r_dot, y - r_dot, x + r_dot, y + r_dot],
+                      fill=col, outline=(0, 0, 0), width=2)
+            if kind == "h":
+                lab = str(di(it))
+            else:
+                nm = (it.get("name") or "").strip() or str(it.get("id", 0))
+                lab = nm if len(nm) <= 16 else nm[:15] + "…"
             tw = int(d.textlength(lab, font=f_lab))
             th = f_lab.size
-            bx0 = min(max(x + 8, 4), W - tw - 16)
-            by0 = min(max(y - 10 - (th + 8), 4), H - th - 12)
-            d.rectangle([bx0, by0, bx0 + tw + 12, by0 + th + 8], fill=(0, 0, 0))
-            d.text((bx0 + (tw + 12) / 2, by0 + (th + 8) / 2), lab,
+            bx0 = min(max(x + 8, 4), W - tw - 12)
+            by0 = min(max(y - 8 - (th + 4), 4), H - th - 8)
+            d.rectangle([bx0, by0, bx0 + tw + 8, by0 + th + 4], fill=(0, 0, 0))
+            d.text((bx0 + (tw + 8) / 2, by0 + (th + 4) / 2), lab,
                    fill=(255, 255, 255), font=f_lab, anchor="mm")
         head = f"[{sid:02d}] {NM.get(sid, '')}"
         tw2 = int(d.textlength(head, font=f_head))
@@ -262,39 +285,53 @@ def bm(houses, sid):
         return None
 
 
-def nt(chats, sid, new_houses, now):
+def ct(sid, items, now, kind):
     deadline = et(now)
     name = NM.get(sid, "")
-    total = len(new_houses)
-    shown = new_houses[:ML]
-    header = f"🏛 Найдено имущество: {total}"
-    server_line = f"🖥 Сервер: [{sid:02d}]" + (f" {name}" if name else "")
-    times = (f"🕒 Найдено: {now.strftime('%d.%m %H:%M')}\n"
-             f"⏳ Слет: {deadline.strftime('%d.%m %H:%M')}")
-    block_lines = [f"🏠 ДОМА ({total})"]
-    for h in shown:
-        line = f"#{di(h)}"
-        title = (h.get("name") or "").strip()
-        if title:
-            line += f" - {title}"
-        block_lines.append(line)
+    total = len(items)
+    shown = items[:ML]
+    if kind == "h":
+        head = "🏠 Найден дом" if total == 1 else "🏘 Найдено несколько домов"
+        block = [f"🏠 ДОМА ({total})"]
+        for it in shown:
+            line = f"#{di(it)}"
+            t = (it.get("name") or "").strip()
+            if t:
+                line += f" - {t}"
+            block.append(line)
+    else:
+        head = "🏦 Найден бизнес" if total == 1 else "🏬 Найдено несколько бизнесов"
+        block = [f"💼 БИЗНЕСЫ ({total})"]
+        for it in shown:
+            t = (it.get("name") or "").strip() or f"#{it.get('id', 0)}"
+            block.append(t)
     if total > len(shown):
-        block_lines.append(f"… и ещё {total - len(shown)}")
-    text = (f"{header}\n\n{server_line}\n\n{times}\n\n"
-            f"<pre>{escape(chr(10).join(block_lines))}</pre>")
-    img = bm(new_houses, sid)
-    combined = img is not None and len(text) <= CL
-    for chat in chats:
-        try:
-            if combined:
-                pp(chat, img, text, parse_mode="HTML")
-            else:
-                ps(chat, text)
-                if img:
-                    pp(chat, img, f"📍 Сервер [{sid:02d}] {name}: позиция дома")
-        except Exception as e:
-            print("send:", e)
-        time.sleep(1)
+        block.append(f"… и ещё {total - len(shown)}")
+    return (f"{head}\n\n💾 Сервер: [{sid:02d}]" + (f" {name}" if name else "") +
+            f"\n\n📷 Обнаружено: {now.strftime('%d.%m.%Y %H:%M')}\n"
+            f"📆 Слет: {deadline.strftime('%d.%m.%Y %H:%M')}\n\n"
+            f"<pre>{escape(chr(10).join(block))}</pre>")
+
+
+def nt(chats, sid, h_items, b_items, now):
+    for kind, items in (("h", h_items), ("b", b_items)):
+        if not items:
+            continue
+        name = NM.get(sid, "")
+        text = ct(sid, items, now, kind)
+        img = bm(items, sid, kind)
+        combined = img is not None and len(text) <= CL
+        for chat in chats:
+            try:
+                if combined:
+                    pp(chat, img, text, parse_mode="HTML")
+                else:
+                    ps(chat, text)
+                    if img:
+                        pp(chat, img, f"📍 Сервер [{sid:02d}] {name}")
+            except Exception as e:
+                print("send:", e)
+            time.sleep(1)
 
 
 def main():
@@ -319,22 +356,32 @@ def main():
 
         free_map = {h["id"]: h for h in d["free"]}
         free_ids = sorted(free_map)
+        biz_map = {b["id"]: b for b in d["biz"]}
+        biz_ids = sorted(biz_map)
 
         prev = state.get(str(sid))
-        prev_free = set(prev.get("free", [])) if prev and prev.get("init") else set()
-        new_ids = [i for i in free_ids if i not in prev_free]
+        init_h = bool(prev and prev.get("init"))
+        prev_free = set(prev.get("free", [])) if init_h else set()
+        has_b = bool(prev and "biz" in prev)
+        prev_biz = set(prev.get("biz", [])) if has_b else None
 
-        if len(new_ids) > AL:
-            print(f"{sid}: skip {len(new_ids)}")
-        elif new_ids:
-            if allowed:
-                print(f"{sid}: +{len(new_ids)}")
-                nt(allowed, sid, [free_map[i] for i in new_ids], datetime.now(TZ))
-            else:
-                print(f"{sid}: no users")
+        new_h = [i for i in free_ids if i not in prev_free]
+        new_b = [i for i in biz_ids if i not in prev_biz] if prev_biz is not None else []
 
-        print(f"{sid}: {len(free_ids)}")
-        state[str(sid)] = {"init": True, "free": free_ids}
+        if len(new_h) > AL:
+            print(f"{sid}: skip h {len(new_h)}")
+            new_h = []
+        if len(new_b) > AL:
+            print(f"{sid}: skip b {len(new_b)}")
+            new_b = []
+
+        if (new_h or new_b) and allowed:
+            print(f"{sid}: +h{len(new_h)} +b{len(new_b)}")
+            nt(allowed, sid, [free_map[i] for i in new_h],
+               [biz_map[i] for i in new_b], datetime.now(TZ))
+
+        print(f"{sid}: h{len(free_ids)} b{len(biz_ids)}")
+        state[str(sid)] = {"init": True, "free": free_ids, "biz": biz_ids}
 
     svst(state)
     print(f"ok {ok}/{len(IDS)}")
