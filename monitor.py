@@ -299,8 +299,8 @@ def bm(items, sid, kind):
                 lab = nm if len(nm) <= 16 else nm[:15] + "…"
             tw = int(d.textlength(lab, font=f_lab))
             th = f_lab.size
-            bx0 = min(max(x + r_dot + 2, 4), W - tw - 10)
-            by0 = min(max(y - r_dot - 2 - (th + 2), 4), H - th - 6)
+            bx0 = min(max(x + r_dot, 4), W - tw - 10)
+            by0 = min(max(y - r_dot - (th + 2), 4), H - th - 6)
             d.rectangle([bx0, by0, bx0 + tw + 6, by0 + th + 2], fill=(0, 0, 0))
             d.text((bx0 + (tw + 6) / 2, by0 + (th + 2) / 2), lab,
                    fill=(255, 255, 255), font=f_lab, anchor="mm")
@@ -393,13 +393,11 @@ def main():
         biz_ids = sorted(biz_map)
 
         prev = state.get(str(sid))
-        init_h = bool(prev and prev.get("init"))
-        prev_free = set(prev.get("free", [])) if init_h else set()
-        has_b = bool(prev and "biz" in prev)
-        prev_biz = set(prev.get("biz", [])) if has_b else None
+        prev_free = set(prev.get("free", [])) if prev else set()
+        prev_biz = set(prev.get("biz", [])) if prev else set()
 
         new_h = [i for i in free_ids if i not in prev_free]
-        new_b = [i for i in biz_ids if i not in prev_biz] if prev_biz is not None else []
+        new_b = [i for i in biz_ids if i not in prev_biz]
 
         if len(new_h) > AL:
             print(f"{sid}: skip h {len(new_h)}")
