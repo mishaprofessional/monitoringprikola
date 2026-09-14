@@ -1,14 +1,31 @@
 import json
 import os
+import time
+import urllib.error
 import urllib.request
+from datetime import datetime, timedelta, timezone
+from html import escape
+
+try:
+    from zoneinfo import ZoneInfo
+    MSK = ZoneInfo("Europe/Moscow")
+except Exception:
+    MSK = timezone(timedelta(hours=3))
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
-CHAT_ID = os.environ.get("CHAT_ID", "")
+KEY = os.environ.get("KEY", "")
+API_URL = "https://n-api.arizona-rp.com/api/map"
 SERVERS_URL = "https://n-api.arizona-rp.com/api/servers/arizona"
 SERVER_IDS = list(range(1, 34))
 BASE = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_FILE = os.path.join(BASE, "settings.json")
 MENU_STATE_FILE = os.path.join(BASE, "menu_state.json")
+
+EXPIRE_HOURS = 2
+ROUND_UP_HOUR = True
+HOUSE_ID_SHIFT = -1
+MAX_LIST_IN_MSG = 60
+FREE_KEYS = ("noOwner", "onMarketplace")
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -21,6 +38,14 @@ HEADERS = {
 ID_KEYS = ("serverId", "server_id", "id", "number", "num", "serverNumber")
 NAME_KEYS = ("name", "fullName", "full_name", "title", "serverName", "label", "displayName")
 
+SERVER_NAMES = {}
+
+LOCK_TEXT = ("🔒 Данный бот является приватным.\n\n"
+             "Чтобы использовать его, пришлите ключ доступа.")
+OK_TEXT = ("✅ Доступ открыт!\n\n"
+           "Напиши /start — бот сразу покажет всё свободное имущество на 33 серверах, "
+           "а дальше будет следить сам: новые слёты будут приходить каждые ~10 минут.")
+
 
 def tg(method, payload):
     data = json.dumps(payload).encode("utf-8")
@@ -31,6 +56,13 @@ def tg(method, payload):
     )
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.loads(r.read().decode("utf-8"))
+
+
+def tg_send(chat_id, text):
+    try:
+        tg("sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": "HTML"})
+    except Exception as e:
+        print("Ошибка отправки:", e)
 
 
 def load_json(path, default):
@@ -91,82 +123,105 @@ def parse_names(data):
     return names
 
 
-def server_names():
+def load_server_names():
+    global SERVER_NAMES
     try:
         req = urllib.request.Request(SERVERS_URL, headers=HEADERS)
         with urllib.request.urlopen(req, timeout=30) as r:
-            data = json.loads(r.read().decode("utf-8"))
-        return parse_names(data)
+            SERVER_NAMES = parse_names(json.loads(r.read().decode("utf-8")))
     except Exception as e:
         print("Список серверов не получен:", e)
-        return {}
 
 
-def is_sub(settings, sid):
-    sub = settings.get("servers")
-    return sub is None or sid in sub
+def http_get_json(url, timeout=30):
+    req = urllib.request.Request(url, headers=HEADERS)
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8"))
 
 
-def cur_text(settings, names):
-    sub = settings.get("servers")
-    if sub is None:
-        return "все 33 сервера"
-    if not sub:
-        return "ничего не выбрано"
-    return ", ".join(f"{s:02d} {names.get(s, '')}".strip() for s in sorted(sub))
+def fetch_free(sid):
+    try:
+        data = http_get_json(f"{API_URL}/{sid}")
+    except Exception:
+        return None
+    houses = data.get("houses") if isinstance(data, dict) else None
+    if not isinstance(houses, dict):
+        return []
+    free = []
+    for key in FREE_KEYS:
+        lst = houses.get(key)
+        if isinstance(lst, list):
+            free.extend(h for h in lst if isinstance(h, dict))
+    lst = houses.get("hasOwner")
+    if isinstance(lst, list):
+        free.extend(h for h in lst if isinstance(h, dict) and not (h.get("owner") or "").strip())
+    return free
 
 
-def main_text():
-    return "👋 Привет, охотник за имуществом!\n\nВыбери нужный раздел ниже."
+def expire_time(now):
+    d = now + timedelta(hours=EXPIRE_HOURS)
+    if ROUND_UP_HOUR:
+        d = d.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    return d
 
 
-def main_kb():
-    return {"inline_keyboard": [
-        [{"text": "🔍 Найти имущество", "callback_data": "find"}],
-    ]}
+def display_id(h):
+    return h.get("id", 0) + HOUSE_ID_SHIFT
 
 
-def sel_text(settings, names):
-    return ("🖥 Выбери серверы, о слётах домов на которых хочешь получать уведомления:\n\n"
-            "✅ — уведомления приходят\n"
-            "⬜️ — выключено\n\n"
-            f"Сейчас подписка: {cur_text(settings, names)}\n\n"
-            "Когда закончишь — жми «✅ Готово».")
+def card_text(sid, houses, now):
+    deadline = expire_time(now)
+    name = SERVER_NAMES.get(sid, "")
+    total = len(houses)
+    shown = houses[:MAX_LIST_IN_MSG]
+    header = f"🏛 Найдено имущество: {total}"
+    server_line = f"🖥 Сервер: [{sid:02d}]" + (f" {name}" if name else "")
+    times = (f"⚪ Найдено: {now.strftime('%d.%m %H:%M')}\n"
+             f"⌛ Слет: {deadline.strftime('%d.%m %H:%M')}")
+    block_lines = [f"🏠 Дома · {total}"]
+    for h in shown:
+        line = f"#{display_id(h)} Дом"
+        title = (h.get("name") or "").strip()
+        if title:
+            line += f" · {title}"
+        block_lines.append(line)
+    if total > len(shown):
+        block_lines.append(f"… и ещё {total - len(shown)}")
+    return (f"{header}\n\n{server_line}\n\n{times}\n\n"
+            f"<pre>{escape(chr(10).join(block_lines))}</pre>")
 
 
-def sel_kb(settings, names):
-    rows, row = [], []
+def dump_all_free(chat_id):
+    load_server_names()
+    tg_send(chat_id, "🔎 Проверяю 33 сервера, присылаю всё свободное на данный момент…")
+    sent = 0
     for sid in SERVER_IDS:
-        mark = "✅" if is_sub(settings, sid) else "⬜️"
-        nm = names.get(sid, f"Сервер {sid}")[:12]
-        row.append({"text": f"{mark} {sid:02d} {nm}", "callback_data": f"t:{sid}"})
-        if len(row) == 2:
-            rows.append(row)
-            row = []
-    if row:
-        rows.append(row)
-    rows.append([{"text": "✅ Готово", "callback_data": "done"}])
-    rows.append([{"text": "← Назад", "callback_data": "back"}])
-    return {"inline_keyboard": rows}
-
-
-def confirm_text(settings, names):
-    return ("✅ Отлично! Настройки сохранены.\n\n"
-            f"Ты подписан на: {cur_text(settings, names)}.\n"
-            "Если что-то слетит на выбранных серверах — бот сразу же тебя оповестит! 🏠🔔")
+        free = None
+        for _ in range(3):
+            free = fetch_free(sid)
+            if free is not None:
+                break
+            time.sleep(2)
+        if not free:
+            continue
+        sent += 1
+        tg_send(chat_id, card_text(sid, free, datetime.now(MSK)))
+        time.sleep(1)
+    if not sent:
+        tg_send(chat_id, "🟢 Сейчас свободных домов нет ни на одном сервере. "
+                         "Бот продолжит следить и пришлёт сообщение, как только что-то слетит.")
 
 
 def main():
-    if not BOT_TOKEN or not CHAT_ID:
+    if not BOT_TOKEN:
         return
-    chat_id = int(CHAT_ID)
     mstate = load_json(MENU_STATE_FILE, {"offset": 0})
-    settings = load_json(SETTINGS_FILE, {"servers": None})
-    names = server_names()
+    settings = load_json(SETTINGS_FILE, {"allowed": []})
+    allowed = set(settings.get("allowed", []))
 
     try:
         resp = tg("getUpdates", {"offset": mstate.get("offset", 0), "timeout": 5,
-                                 "allowed_updates": ["message", "callback_query"]})
+                                 "allowed_updates": ["message"]})
     except Exception as e:
         print("getUpdates error:", e)
         return
@@ -174,71 +229,24 @@ def main():
 
     for u in updates:
         mstate["offset"] = max(mstate.get("offset", 0), u["update_id"] + 1)
-        cb = u.get("callback_query")
-        if cb:
-            if (cb.get("from") or {}).get("id") != chat_id:
-                continue
-            data = cb.get("data", "")
-            mid = (cb.get("message") or {}).get("message_id")
-            try:
-                tg("answerCallbackQuery", {"callback_query_id": cb.get("id")})
-            except Exception:
-                pass
-
-            if data == "find":
-                try:
-                    tg("editMessageText", {"chat_id": chat_id, "message_id": mid,
-                                           "text": sel_text(settings, names),
-                                           "reply_markup": sel_kb(settings, names)})
-                except Exception as e:
-                    print("edit error:", e)
-            elif data == "back":
-                try:
-                    tg("editMessageText", {"chat_id": chat_id, "message_id": mid,
-                                           "text": main_text(), "reply_markup": main_kb()})
-                except Exception as e:
-                    print("edit error:", e)
-            elif data.startswith("t:"):
-                sid = int(data[2:])
-                sub = settings.get("servers")
-                if sub is None:
-                    sub = list(SERVER_IDS)
-                if sid in sub:
-                    sub.remove(sid)
-                else:
-                    sub.append(sid)
-                settings["servers"] = sorted(sub)
-                try:
-                    tg("editMessageText", {"chat_id": chat_id, "message_id": mid,
-                                           "text": sel_text(settings, names),
-                                           "reply_markup": sel_kb(settings, names)})
-                except Exception as e:
-                    print("edit error:", e)
-            elif data == "done":
-                try:
-                    tg("editMessageText", {"chat_id": chat_id, "message_id": mid,
-                                           "text": "✅ Выбор сохранён."})
-                except Exception:
-                    pass
-                try:
-                    tg("sendMessage", {"chat_id": chat_id,
-                                       "text": confirm_text(settings, names),
-                                       "reply_markup": main_kb()})
-                except Exception as e:
-                    print("send error:", e)
-            continue
-
         msg = u.get("message") or {}
-        if msg.get("chat", {}).get("id") != chat_id:
+        chat_id = msg.get("chat", {}).get("id")
+        if chat_id is None:
             continue
         text = (msg.get("text") or "").strip()
-        if text in ("/start", "/menu", "/settings", "Меню", "меню"):
-            try:
-                tg("sendMessage", {"chat_id": chat_id, "text": main_text(),
-                                   "reply_markup": main_kb()})
-            except Exception as e:
-                print("send error:", e)
 
+        if KEY and text == KEY:
+            allowed.add(chat_id)
+            tg_send(chat_id, OK_TEXT)
+            continue
+
+        if text in ("/start", "/menu", "Меню", "меню"):
+            if chat_id in allowed:
+                dump_all_free(chat_id)
+            else:
+                tg_send(chat_id, LOCK_TEXT)
+
+    settings["allowed"] = sorted(allowed)
     save_json(SETTINGS_FILE, settings)
     save_json(MENU_STATE_FILE, mstate)
     print("menu ok, updates:", len(updates))
