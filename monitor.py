@@ -21,11 +21,12 @@ SERVERS_URL = "https://n-api.arizona-rp.com/api/servers/arizona"
 SERVER_IDS = list(range(1, 34))
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")
 
-EXPIRE_HOURS = 2        # слет = находка + N часов
+EXPIRE_HOURS = 2        # слет = находка + N часов (если у дома нет auTimeEnd)
 ROUND_UP_HOUR = False   # True - округлять слет вверх до часа
 HOUSE_ID_SHIFT = -1     # номера домов на карте сдвинуты относительно id API
 MAX_LIST_IN_MSG = 60    # максимум домов в одной карточке
 ANOMALY_LIMIT = 200     # больше сразу = подозрение на глюк API, молча переснять
+FREE_KEYS = ("noOwner", "onMarketplace")   # списки свободных домов в ответе API
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -71,7 +72,8 @@ def load_server_names():
         print("Список серверов не получен:", e)
 
 
-def fetch_houses(sid):
+def fetch_server_data(sid):
+    """Возвращает {"free": [записи свободных домов], "occupied": N} или None."""
     try:
         data = http_get_json(f"{API_URL}/{sid}")
     except urllib.error.HTTPError as e:
@@ -82,19 +84,35 @@ def fetch_houses(sid):
         return None
 
     houses = data.get("houses") if isinstance(data, dict) else None
-    if isinstance(houses, dict):
-        items = [h for lst in houses.values() if isinstance(lst, list) for h in lst if isinstance(h, dict)]
-    elif isinstance(houses, list):
-        items = [h for h in houses if isinstance(h, dict)]
+    if not isinstance(houses, dict):
+        return {"free": [], "occupied": 0}
+
+    free = []
+    for key in FREE_KEYS:
+        lst = houses.get(key)
+        if isinstance(lst, list):
+            free.extend(h for h in lst if isinstance(h, dict))
+    # страховка: вдруг свободный окажется в hasOwner с пустым владельцем
+    lst = houses.get("hasOwner")
+    if isinstance(lst, list):
+        free.extend(h for h in lst if isinstance(h, dict) and not (h.get("owner") or "").strip())
+        occupied = len(lst)
     else:
-        items = []
-    return items
+        occupied = 0
+    return {"free": free, "occupied": occupied}
 
 
-def is_free_entry(h):
-    if "isOwned" in h:
-        return not bool(h["isOwned"])
-    return h.get("owner") in (None, "", "нет", "None")
+def expire_time(h, now):
+    ts = h.get("auTimeEnd") or 0
+    if ts:
+        try:
+            return datetime.fromtimestamp(int(ts), MSK)
+        except Exception:
+            pass
+    d = now + timedelta(hours=EXPIRE_HOURS)
+    if ROUND_UP_HOUR:
+        d = (d + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+    return d
 
 
 def load_state():
@@ -115,26 +133,25 @@ def display_id(h):
 
 
 def notify(sid, new_houses, now):
-    deadline = now + timedelta(hours=EXPIRE_HOURS)
-    if ROUND_UP_HOUR:
-        deadline = (deadline + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
     name = SERVER_NAMES.get(sid, "")
     total = len(new_houses)
     shown = new_houses[:MAX_LIST_IN_MSG]
     header = f"🏛 Найдено имущество: {total}"
     server_line = f"🖥 Сервер: [{sid}]" + (f" {name}" if name else "")
-    times = (f"⚪ Найдено: {now.strftime('%d.%m %H:%M')}\n"
-             f"⌛ Слет: {deadline.strftime('%d.%m %H:%M')}")
-    block_lines = [f"🏠 ДОМА ({total})"]
+    block_lines = []
     for h in shown:
+        found = now
+        deadline = expire_time(h, now)
+        times = (f"⚪ Найдено: {found.strftime('%d.%m %H:%M')}\n"
+                 f"⌛ Слет: {deadline.strftime('%d.%m %H:%M')}")
         line = f"#{display_id(h)}"
         title = (h.get("name") or "").strip()
         if title:
             line += f" - {title}"
-        block_lines.append(line)
+        block_lines.append(f"{times}\n{line}")
     if total > len(shown):
         block_lines.append(f"… и ещё {total - len(shown)}")
-    text = (f"{header}\n\n{server_line}\n\n{times}\n\n"
+    text = (f"{header}\n\n{server_line}\n\n"
             f"<pre>{escape(chr(10).join(block_lines))}</pre>")
     try:
         tg_send(text)
@@ -152,43 +169,32 @@ def main():
     ok = 0
 
     for sid in SERVER_IDS:
-        houses = None
+        d = None
         for _ in range(3):
-            houses = fetch_houses(sid)
-            if houses is not None:
+            d = fetch_server_data(sid)
+            if d is not None:
                 break
             time.sleep(2)
-        if houses is None:
+        if d is None:
             continue
         ok += 1
 
-        cur_ids = sorted(h["id"] for h in houses)
-        prev = state.get(str(sid))
-
-        # максимальный известный id дома на сервере
-        max_seen = cur_ids[-1] if cur_ids else 0
-        if prev and prev.get("max_id", 0) > max_seen:
-            max_seen = prev["max_id"]
-
-        # свободные = дырки в нумерации 1..max_seen + записи с пустым владельцем
-        occupied = set(cur_ids)
-        free_map = {h["id"]: h for h in houses if is_free_entry(h)}
-        for g in range(1, max_seen + 1):
-            if g not in occupied:
-                free_map.setdefault(g, {"id": g, "name": ""})
+        free_map = {h["id"]: h for h in d["free"]}
         free_ids = sorted(free_map)
 
+        prev = state.get(str(sid))
         prev_free = set(prev.get("free", [])) if prev and prev.get("init") else set()
         new_ids = [i for i in free_ids if i not in prev_free]
 
         if len(new_ids) > ANOMALY_LIMIT:
-            print(f"server {sid}: аномалия ({len(new_ids)} свободных), переснимаю снимок молча")
+            print(f"server {sid}: аномалия ({len(new_ids)}), переснимаю молча")
         elif new_ids:
             print(f"server {sid}: новые свободные {[display_id(free_map[i]) for i in new_ids]}")
             notify(sid, [free_map[i] for i in new_ids], datetime.now(MSK))
             time.sleep(1)
 
-        state[str(sid)] = {"init": True, "ids": cur_ids, "free": free_ids, "max_id": max_seen}
+        print(f"server {sid}: занятых {d['occupied']}, свободных {len(free_ids)}")
+        state[str(sid)] = {"init": True, "free": free_ids}
 
     save_state(state)
     print(f"Готово. Серверов отвечают: {ok}/{len(SERVER_IDS)}")
