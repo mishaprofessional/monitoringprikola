@@ -21,8 +21,8 @@ SERVERS_URL = "https://n-api.arizona-rp.com/api/servers/arizona"
 SERVER_IDS = list(range(1, 34))
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")
 
-EXPIRE_HOURS = 2        # слет = находка + N часов (если у дома нет auTimeEnd)
-ROUND_UP_HOUR = False   # True - округлять слет вверх до часа
+EXPIRE_HOURS = 2        # слет = находка + N часов
+ROUND_UP_HOUR = True    # округлять слет вверх до часа (как в образце)
 HOUSE_ID_SHIFT = -1     # номера домов на карте сдвинуты относительно id API
 MAX_LIST_IN_MSG = 60    # максимум домов в одной карточке
 ANOMALY_LIMIT = 200     # больше сразу = подозрение на глюк API, молча переснять
@@ -92,7 +92,6 @@ def fetch_server_data(sid):
         lst = houses.get(key)
         if isinstance(lst, list):
             free.extend(h for h in lst if isinstance(h, dict))
-    # страховка: вдруг свободный окажется в hasOwner с пустым владельцем
     lst = houses.get("hasOwner")
     if isinstance(lst, list):
         free.extend(h for h in lst if isinstance(h, dict) and not (h.get("owner") or "").strip())
@@ -102,16 +101,10 @@ def fetch_server_data(sid):
     return {"free": free, "occupied": occupied}
 
 
-def expire_time(h, now):
-    ts = h.get("auTimeEnd") or 0
-    if ts:
-        try:
-            return datetime.fromtimestamp(int(ts), MSK)
-        except Exception:
-            pass
+def expire_time(now):
     d = now + timedelta(hours=EXPIRE_HOURS)
     if ROUND_UP_HOUR:
-        d = (d + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+        d = d.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
     return d
 
 
@@ -133,25 +126,24 @@ def display_id(h):
 
 
 def notify(sid, new_houses, now):
+    deadline = expire_time(now)
     name = SERVER_NAMES.get(sid, "")
     total = len(new_houses)
     shown = new_houses[:MAX_LIST_IN_MSG]
     header = f"🏛 Найдено имущество: {total}"
-    server_line = f"🖥 Сервер: [{sid}]" + (f" {name}" if name else "")
-    block_lines = []
+    server_line = f"🖥 Сервер: [{sid:02d}]" + (f" {name}" if name else "")
+    times = (f"⚪ Найдено: {now.strftime('%d.%m %H:%M')}\n"
+             f"⌛ Слет: {deadline.strftime('%d.%m %H:%M')}")
+    block_lines = [f"🏠 Дома · {total}"]
     for h in shown:
-        found = now
-        deadline = expire_time(h, now)
-        times = (f"⚪ Найдено: {found.strftime('%d.%m %H:%M')}\n"
-                 f"⌛ Слет: {deadline.strftime('%d.%m %H:%M')}")
-        line = f"#{display_id(h)}"
+        line = f"#{display_id(h)} Дом"
         title = (h.get("name") or "").strip()
         if title:
-            line += f" - {title}"
-        block_lines.append(f"{times}\n{line}")
+            line += f" · {title}"
+        block_lines.append(line)
     if total > len(shown):
         block_lines.append(f"… и ещё {total - len(shown)}")
-    text = (f"{header}\n\n{server_line}\n\n"
+    text = (f"{header}\n\n{server_line}\n\n{times}\n\n"
             f"<pre>{escape(chr(10).join(block_lines))}</pre>")
     try:
         tg_send(text)
