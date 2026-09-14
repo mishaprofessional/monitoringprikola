@@ -66,6 +66,14 @@ def user_title(u):
     return title
 
 
+def fetch_chat_title(cid):
+    try:
+        ch = tg("getChat", {"chat_id": cid})
+        return user_title(ch)
+    except Exception:
+        return None
+
+
 def main():
     if not BOT_TOKEN:
         return
@@ -107,14 +115,20 @@ def main():
 
         if text in ("/who", "/users", "/access"):
             if owner is not None and chat_id == owner:
-                info = settings.get("allowed_info", {})
+                info = settings.setdefault("allowed_info", {})
                 lines = []
                 for cid in sorted(allowed):
                     r = info.get(str(cid))
-                    if r:
-                        lines.append(f"• {r['name']} — id {cid}, доступ с {r['since']}")
+                    if not r or not r.get("name") or r["name"] == "Неизвестный пользователь":
+                        title = fetch_chat_title(cid)
+                        if title:
+                            r = {"name": title, "id": cid,
+                                 "since": (r or {}).get("since", "данных нет")}
+                            info[str(cid)] = r
+                    if r and r.get("name"):
+                        lines.append(f"• {r['name']} — доступ с {r['since']}")
                     else:
-                        lines.append(f"• id {cid} (активировал раньше, данных нет)")
+                        lines.append(f"• id {cid} (не удалось получить профиль)")
                 if not lines:
                     lines.append("Пока никого.")
                 tg_send(chat_id, "🔑 У кого есть доступ:\n" + "\n".join(lines))
