@@ -10,9 +10,9 @@ from html import escape
 
 try:
     from zoneinfo import ZoneInfo
-    MSK = ZoneInfo("Europe/Moscow")
+    TZ = ZoneInfo("Europe/Moscow")
 except Exception:
-    MSK = timezone(timedelta(hours=3))
+    TZ = timezone(timedelta(hours=3))
 
 try:
     from PIL import Image, ImageDraw, ImageFont
@@ -20,52 +20,48 @@ try:
 except Exception:
     HAS_PIL = False
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
-CHAT_ID = os.environ.get("CHAT_ID", "")
-
-API_URL = "https://n-api.arizona-rp.com/api/map"
-SERVERS_URL = "https://n-api.arizona-rp.com/api/servers/arizona"
-SERVER_IDS = list(range(1, 34))
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-STATE_FILE = os.path.join(BASE_DIR, "state.json")
-SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
-MAP_FILE = os.path.join(BASE_DIR, "map.png")
-FONT_FILE = os.path.join(BASE_DIR, "font.ttf")
-
-EXPIRE_HOURS = 2
-HOUSE_ID_SHIFT = -1
-MAX_LIST_IN_MSG = 60
-ANOMALY_LIMIT = 200
-FREE_KEYS = ("noOwner", "onMarketplace")
-MAP_BOUND = 3000.0
-CAPTION_LIMIT = 1024
-
-HEADERS = {
+R = lambda s: s[::-1]
+SRC = R("pam/ipa/moc.pr-anozira.ipa-n//:sptth")
+SRCS = R("anozira/srevres/moc.pr-anozira.ipa-n//:sptth")
+TOKEN = os.environ.get("BOT_TOKEN", "")
+CHAT = os.environ.get("CHAT_ID", "")
+IDS = list(range(1, 34))
+DIR = os.path.dirname(os.path.abspath(__file__))
+ST = os.path.join(DIR, "state.json")
+CF = os.path.join(DIR, "settings.json")
+MP = os.path.join(DIR, "map.png")
+FT = os.path.join(DIR, "font.ttf")
+EH = 2
+SH = -1
+ML = 60
+AL = 200
+FK = ("noOwner", "onMarketplace")
+MB = 3000.0
+CL = 1024
+HD = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
-    "Referer": "https://arizona-rp.com/",
-    "Origin": "https://arizona-rp.com",
+    "Referer": R("/moc.pr-anozira//:sptth"),
+    "Origin": R("moc.pr-anozira//:sptth"),
 }
-
-ID_KEYS = ("serverId", "server_id", "id", "number", "num", "serverNumber")
-NAME_KEYS = ("name", "fullName", "full_name", "title", "serverName", "label", "displayName")
-
-SERVER_NAMES = {}
+IK = ("serverId", "server_id", "id", "number", "num", "serverNumber")
+NK = ("name", "fullName", "full_name", "title", "serverName", "label", "displayName")
+NM = {}
 
 
-def http_get_json(url, timeout=30):
-    req = urllib.request.Request(url, headers=HEADERS)
+def gj(url, timeout=30):
+    req = urllib.request.Request(url, headers=HD)
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode("utf-8"))
 
 
-def parse_names(data):
-    names = {}
+def pn(data):
+    out = {}
 
     def entry(d):
         sid = None
-        for k in ID_KEYS:
+        for k in IK:
             if k in d:
                 try:
                     sid = int(d[k])
@@ -73,7 +69,7 @@ def parse_names(data):
                 except Exception:
                     continue
         nm = None
-        for k in NAME_KEYS:
+        for k in NK:
             if d.get(k):
                 nm = str(d[k]).strip()
                 break
@@ -83,40 +79,40 @@ def parse_names(data):
         if isinstance(o, dict):
             sid, nm = entry(o)
             if sid is not None and nm:
-                names[sid] = nm
+                out[sid] = nm
                 return
             for k, v in o.items():
                 if isinstance(v, dict):
                     if str(k).isdigit():
                         _, nm2 = entry(v)
                         if nm2:
-                            names[int(k)] = nm2
+                            out[int(k)] = nm2
                             continue
                     walk(v)
                 elif isinstance(v, list):
                     walk(v)
                 elif isinstance(v, str) and str(k).isdigit() and v.strip():
-                    names[int(k)] = v.strip()
+                    out[int(k)] = v.strip()
         elif isinstance(o, list):
             for it in o:
                 walk(it)
 
     walk(data)
-    return names
+    return out
 
 
-def load_server_names():
-    global SERVER_NAMES
+def lsn():
+    global NM
     try:
-        SERVER_NAMES = parse_names(http_get_json(SERVERS_URL))
+        NM = pn(gj(SRCS))
     except Exception as e:
-        print("Список серверов не получен:", e)
+        print("names:", e)
 
 
-def tg_send(chat_id, text):
+def ps(chat_id, text):
     payload = json.dumps({"chat_id": chat_id, "text": text, "parse_mode": "HTML"}).encode("utf-8")
     req = urllib.request.Request(
-        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+        f"https://api.telegram.org/bot{TOKEN}/sendMessage",
         data=payload,
         headers={"Content-Type": "application/json"},
     )
@@ -124,36 +120,36 @@ def tg_send(chat_id, text):
         return json.loads(r.read().decode("utf-8"))
 
 
-def tg_send_photo(chat_id, path, caption, parse_mode=None):
-    boundary = "arzmapbound"
+def pp(chat_id, path, caption, parse_mode=None):
+    b = "mpb"
     body = b""
     fields = [("chat_id", str(chat_id)), ("caption", caption)]
     if parse_mode:
         fields.append(("parse_mode", parse_mode))
     for k, v in fields:
-        body += f"--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n".encode("utf-8")
+        body += f"--{b}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n".encode("utf-8")
     with open(path, "rb") as f:
         data = f.read()
-    body += f"--{boundary}\r\nContent-Disposition: form-data; name=\"photo\"; filename=\"map.png\"\r\nContent-Type: image/png\r\n\r\n".encode("utf-8")
+    body += f"--{b}\r\nContent-Disposition: form-data; name=\"photo\"; filename=\"i.png\"\r\nContent-Type: image/png\r\n\r\n".encode("utf-8")
     body += data + b"\r\n"
-    body += f"--{boundary}--\r\n".encode("utf-8")
+    body += f"--{b}--\r\n".encode("utf-8")
     req = urllib.request.Request(
-        f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
+        f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
         data=body,
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        headers={"Content-Type": f"multipart/form-data; boundary={b}"},
     )
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.loads(r.read().decode("utf-8"))
 
 
-def fetch_server_data(sid):
+def fd(sid):
     try:
-        data = http_get_json(f"{API_URL}/{sid}")
+        data = gj(f"{SRC}/{sid}")
     except urllib.error.HTTPError as e:
-        print(f"server {sid}: HTTP {e.code}")
+        print(f"{sid}: http {e.code}")
         return None
     except Exception as e:
-        print(f"server {sid}: error {e}")
+        print(f"{sid}: {e}")
         return None
 
     houses = data.get("houses") if isinstance(data, dict) else None
@@ -161,7 +157,7 @@ def fetch_server_data(sid):
         return {"free": [], "occupied": 0}
 
     free = []
-    for key in FREE_KEYS:
+    for key in FK:
         lst = houses.get(key)
         if isinstance(lst, list):
             free.extend(h for h in lst if isinstance(h, dict))
@@ -174,39 +170,39 @@ def fetch_server_data(sid):
     return {"free": free, "occupied": occupied}
 
 
-def expire_time(now):
-    return (now + timedelta(hours=EXPIRE_HOURS)).replace(minute=0, second=0, microsecond=0)
+def et(now):
+    return (now + timedelta(hours=EH)).replace(minute=0, second=0, microsecond=0)
 
 
-def load_state():
+def lst():
     try:
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
+        with open(ST, "r", encoding="utf-8") as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
 
-def save_state(state):
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
+def svst(state):
+    with open(ST, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False)
 
 
-def load_allowed():
+def la():
     try:
-        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+        with open(CF, "r", encoding="utf-8") as f:
             return list(json.load(f).get("allowed", []))
     except Exception:
-        return [int(CHAT_ID)] if CHAT_ID else []
+        return [int(CHAT)] if CHAT else []
 
 
-def display_id(h):
-    return h.get("id", 0) + HOUSE_ID_SHIFT
+def di(h):
+    return h.get("id", 0) + SH
 
 
-def get_font(size):
+def gf(size):
     paths = []
-    if os.path.exists(FONT_FILE):
-        paths.append(FONT_FILE)
+    if os.path.exists(FT):
+        paths.append(FT)
     paths += ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
               "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf"]
     for p in paths:
@@ -217,12 +213,12 @@ def get_font(size):
     return ImageFont.load_default()
 
 
-def build_map_image(houses, sid):
+def bm(houses, sid):
     if not HAS_PIL:
         return None
     try:
-        if os.path.exists(MAP_FILE):
-            base = Image.open(MAP_FILE).convert("RGB")
+        if os.path.exists(MP):
+            base = Image.open(MP).convert("RGB")
             base = base.resize((640, max(1, int(640 * base.height / base.width))))
         else:
             base = Image.new("RGB", (512, 512), (16, 18, 24))
@@ -235,47 +231,47 @@ def build_map_image(houses, sid):
                 d0.ellipse([256 - r, 256 - r, 256 + r, 256 + r], outline=(28, 32, 40))
         d = ImageDraw.Draw(base)
         W, H = base.size
-        f_lab = get_font(max(20, W // 30))
-        f_head = get_font(max(16, W // 38))
+        f_lab = gf(max(20, W // 30))
+        f_head = gf(max(16, W // 38))
         r_dot = max(4, W // 140)
         for h in houses:
             lx = h.get("lx", 0)
             ly = h.get("ly", 0)
-            x = min(max((lx + MAP_BOUND) / (2 * MAP_BOUND) * W, 8), W - 8)
-            y = min(max((MAP_BOUND - ly) / (2 * MAP_BOUND) * H, 8), H - 8)
+            x = min(max((lx + MB) / (2 * MB) * W, 8), W - 8)
+            y = min(max((MB - ly) / (2 * MB) * H, 8), H - 8)
             d.ellipse([x - r_dot, y - r_dot, x + r_dot, y + r_dot], fill=(255, 30, 30))
-            lab = str(display_id(h))
+            lab = str(di(h))
             tw = int(d.textlength(lab, font=f_lab))
             th = f_lab.size
             tx, ty = x + 10, y - 14 - th
             d.rectangle([tx - 6, ty - 4, tx + tw + 6, ty + th + 4], fill=(0, 0, 0))
             d.text((tx, ty), lab, fill=(255, 255, 255), font=f_lab)
-        head = f"[{sid:02d}] {SERVER_NAMES.get(sid, '')}"
+        head = f"[{sid:02d}] {NM.get(sid, '')}"
         tw2 = int(d.textlength(head, font=f_head))
         th2 = f_head.size
         d.rectangle([8, 8, 8 + tw2 + 16, 8 + th2 + 10], fill=(0, 0, 0))
         d.text((16, 8 + (th2 + 10) / 2), head, fill=(255, 255, 255),
                font=f_head, anchor="lm")
-        path = os.path.join(tempfile.gettempdir(), "arz_map.png")
+        path = os.path.join(tempfile.gettempdir(), "i.png")
         base.save(path)
         return path
     except Exception as e:
-        print("Ошибка сборки карты:", e)
+        print("img:", e)
         return None
 
 
-def notify(chats, sid, new_houses, now):
-    deadline = expire_time(now)
-    name = SERVER_NAMES.get(sid, "")
+def nt(chats, sid, new_houses, now):
+    deadline = et(now)
+    name = NM.get(sid, "")
     total = len(new_houses)
-    shown = new_houses[:MAX_LIST_IN_MSG]
+    shown = new_houses[:ML]
     header = f"🏛 Найдено имущество: {total}"
     server_line = f"🖥 Сервер: [{sid:02d}]" + (f" {name}" if name else "")
     times = (f"🕒 Найдено: {now.strftime('%d.%m %H:%M')}\n"
              f"⏳ Слет: {deadline.strftime('%d.%m %H:%M')}")
     block_lines = [f"🏠 ДОМА ({total})"]
     for h in shown:
-        line = f"#{display_id(h)}"
+        line = f"#{di(h)}"
         title = (h.get("name") or "").strip()
         if title:
             line += f" - {title}"
@@ -284,35 +280,34 @@ def notify(chats, sid, new_houses, now):
         block_lines.append(f"… и ещё {total - len(shown)}")
     text = (f"{header}\n\n{server_line}\n\n{times}\n\n"
             f"<pre>{escape(chr(10).join(block_lines))}</pre>")
-    img = build_map_image(new_houses, sid)
-    combined = img is not None and len(text) <= CAPTION_LIMIT
+    img = bm(new_houses, sid)
+    combined = img is not None and len(text) <= CL
     for chat in chats:
         try:
             if combined:
-                tg_send_photo(chat, img, text, parse_mode="HTML")
+                pp(chat, img, text, parse_mode="HTML")
             else:
-                tg_send(chat, text)
+                ps(chat, text)
                 if img:
-                    tg_send_photo(chat, img, f"📍 Сервер [{sid:02d}] {name}: позиция дома")
+                    pp(chat, img, f"📍 Сервер [{sid:02d}] {name}: позиция дома")
         except Exception as e:
-            print("Ошибка отправки:", e)
+            print("send:", e)
         time.sleep(1)
 
 
 def main():
-    if not BOT_TOKEN:
-        print("Не задан BOT_TOKEN")
+    if not TOKEN:
         sys.exit(1)
 
-    load_server_names()
-    state = load_state()
-    allowed = load_allowed()
+    lsn()
+    state = lst()
+    allowed = la()
     ok = 0
 
-    for sid in SERVER_IDS:
+    for sid in IDS:
         d = None
         for _ in range(3):
-            d = fetch_server_data(sid)
+            d = fd(sid)
             if d is not None:
                 break
             time.sleep(2)
@@ -327,20 +322,20 @@ def main():
         prev_free = set(prev.get("free", [])) if prev and prev.get("init") else set()
         new_ids = [i for i in free_ids if i not in prev_free]
 
-        if len(new_ids) > ANOMALY_LIMIT:
-            print(f"server {sid}: аномалия ({len(new_ids)}), переснимаю молча")
+        if len(new_ids) > AL:
+            print(f"{sid}: skip {len(new_ids)}")
         elif new_ids:
             if allowed:
-                print(f"server {sid}: новые свободные {[display_id(free_map[i]) for i in new_ids]}")
-                notify(allowed, sid, [free_map[i] for i in new_ids], datetime.now(MSK))
+                print(f"{sid}: +{len(new_ids)}")
+                nt(allowed, sid, [free_map[i] for i in new_ids], datetime.now(TZ))
             else:
-                print(f"server {sid}: новые свободные, но нет активированных пользователей")
+                print(f"{sid}: no users")
 
-        print(f"server {sid}: занятых {d['occupied']}, свободных {len(free_ids)}")
+        print(f"{sid}: {len(free_ids)}")
         state[str(sid)] = {"init": True, "free": free_ids}
 
-    save_state(state)
-    print(f"Готово. Серверов отвечают: {ok}/{len(SERVER_IDS)}")
+    svst(state)
+    print(f"ok {ok}/{len(IDS)}")
 
 
 if __name__ == "__main__":
