@@ -102,8 +102,8 @@ def load_server_names():
         print("Список серверов не получен:", e)
 
 
-def tg_send(text):
-    payload = json.dumps({"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}).encode("utf-8")
+def tg_send(chat_id, text):
+    payload = json.dumps({"chat_id": chat_id, "text": text, "parse_mode": "HTML"}).encode("utf-8")
     req = urllib.request.Request(
         f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
         data=payload,
@@ -161,19 +161,19 @@ def save_state(state):
         json.dump(state, f, ensure_ascii=False)
 
 
-def load_settings():
+def load_allowed():
     try:
         with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            return list(json.load(f).get("allowed", []))
     except Exception:
-        return {"servers": None}
+        return [int(CHAT_ID)] if CHAT_ID else []
 
 
 def display_id(h):
     return h.get("id", 0) + HOUSE_ID_SHIFT
 
 
-def notify(sid, new_houses, now):
+def notify(chats, sid, new_houses, now):
     deadline = expire_time(now)
     name = SERVER_NAMES.get(sid, "")
     total = len(new_houses)
@@ -193,20 +193,22 @@ def notify(sid, new_houses, now):
         block_lines.append(f"… и ещё {total - len(shown)}")
     text = (f"{header}\n\n{server_line}\n\n{times}\n\n"
             f"<pre>{escape(chr(10).join(block_lines))}</pre>")
-    try:
-        tg_send(text)
-    except Exception as e:
-        print("Ошибка отправки в Telegram:", e)
+    for chat in chats:
+        try:
+            tg_send(chat, text)
+        except Exception as e:
+            print("Ошибка отправки:", e)
+        time.sleep(1)
 
 
 def main():
-    if not BOT_TOKEN or not CHAT_ID:
-        print("Не заданы BOT_TOKEN / CHAT_ID в Secrets")
+    if not BOT_TOKEN:
+        print("Не задан BOT_TOKEN")
         sys.exit(1)
 
     load_server_names()
     state = load_state()
-    sub = load_settings().get("servers")
+    allowed = load_allowed()
     ok = 0
 
     for sid in SERVER_IDS:
@@ -230,12 +232,11 @@ def main():
         if len(new_ids) > ANOMALY_LIMIT:
             print(f"server {sid}: аномалия ({len(new_ids)}), переснимаю молча")
         elif new_ids:
-            if sub is None or sid in sub:
+            if allowed:
                 print(f"server {sid}: новые свободные {[display_id(free_map[i]) for i in new_ids]}")
-                notify(sid, [free_map[i] for i in new_ids], datetime.now(MSK))
-                time.sleep(1)
+                notify(allowed, sid, [free_map[i] for i in new_ids], datetime.now(MSK))
             else:
-                print(f"server {sid}: новые свободные, но сервер не в подписке")
+                print(f"server {sid}: новые свободные, но нет активированных пользователей")
 
         print(f"server {sid}: занятых {d['occupied']}, свободных {len(free_ids)}")
         state[str(sid)] = {"init": True, "free": free_ids}
