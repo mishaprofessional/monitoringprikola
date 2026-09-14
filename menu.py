@@ -159,7 +159,6 @@ def main():
                         rec = info.pop(str(target), None)
                         nm = (rec or {}).get("name") or f"id {target}"
                         tg_send(chat_id, f"🚫 Доступ отозван: {nm}")
-                        tg_send(target, "🚫 Доступ к боту отозван владельцем.")
                     else:
                         tg_send(chat_id, "😕 Не нашёл такого среди имеющих доступ. Список: /who")
             else:
