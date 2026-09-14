@@ -48,6 +48,7 @@ HD = {
 IK = ("serverId", "server_id", "id", "number", "num", "serverNumber")
 NK = ("name", "fullName", "full_name", "title", "serverName", "label", "displayName")
 NM = {}
+LK = []
 
 
 def gj(url, timeout=30):
@@ -144,7 +145,7 @@ def pp(chat_id, path, caption, parse_mode=None):
 
 def wb(o, out):
     if isinstance(o, dict):
-        if "lx" in o and "owner" in o:
+        if "lx" in o and "owner" in o and "type" in o:
             out.append(o)
         else:
             for v in o.values():
@@ -155,6 +156,7 @@ def wb(o, out):
 
 
 def fd(sid):
+    global LK
     try:
         data = gj(f"{SRC}/{sid}")
     except urllib.error.HTTPError as e:
@@ -163,6 +165,9 @@ def fd(sid):
     except Exception as e:
         print(f"{sid}: {e}")
         return None
+
+    if isinstance(data, dict) and not LK:
+        LK = list(data.keys())
 
     houses = data.get("houses") if isinstance(data, dict) else None
     if not isinstance(houses, dict):
@@ -181,7 +186,7 @@ def fd(sid):
         occupied = 0
 
     biz_all = []
-    wb(data.get("businesses"), biz_all)
+    wb(data, biz_all)
     biz = [b for b in biz_all if isinstance(b, dict) and "id" in b
            and not (b.get("owner") or "").strip()]
     return {"free": free, "biz": biz, "occupied": occupied}
@@ -249,14 +254,16 @@ def bm(items, sid, kind):
         d = ImageDraw.Draw(base)
         W, H = base.size
         f_head = gf(max(14, W // 44))
-        f_lab = gf(max(12, W // 50))
-        r_dot = max(3, W // 180)
+        f_lab = gf(max(14, W // 40))
+        r_dot = max(4, W // 150)
         col = (255, 30, 30) if kind == "h" else (60, 220, 90)
         for it in items:
             lx = it.get("lx", 0)
             ly = it.get("ly", 0)
             x = min(max((lx + MB) / (2 * MB) * W, 8), W - 8)
             y = min(max((MB - ly) / (2 * MB) * H, 8), H - 8)
+            d.ellipse([x - r_dot + 2, y - r_dot + 3, x + r_dot + 2, y + r_dot + 3],
+                      fill=(0, 0, 0))
             d.ellipse([x - r_dot, y - r_dot, x + r_dot, y + r_dot],
                       fill=col, outline=(0, 0, 0), width=2)
             if kind == "h":
@@ -266,10 +273,10 @@ def bm(items, sid, kind):
                 lab = nm if len(nm) <= 16 else nm[:15] + "…"
             tw = int(d.textlength(lab, font=f_lab))
             th = f_lab.size
-            bx0 = min(max(x + 8, 4), W - tw - 12)
-            by0 = min(max(y - 8 - (th + 4), 4), H - th - 8)
-            d.rectangle([bx0, by0, bx0 + tw + 8, by0 + th + 4], fill=(0, 0, 0))
-            d.text((bx0 + (tw + 8) / 2, by0 + (th + 4) / 2), lab,
+            bx0 = min(max(x + 8, 4), W - tw - 10)
+            by0 = min(max(y - 10 - (th + 2), 4), H - th - 6)
+            d.rectangle([bx0, by0, bx0 + tw + 6, by0 + th + 2], fill=(0, 0, 0))
+            d.text((bx0 + (tw + 6) / 2, by0 + (th + 2) / 2), lab,
                    fill=(255, 255, 255), font=f_lab, anchor="mm")
         head = f"[{sid:02d}] {NM.get(sid, '')}"
         tw2 = int(d.textlength(head, font=f_head))
@@ -385,6 +392,8 @@ def main():
 
     svst(state)
     print(f"ok {ok}/{len(IDS)}")
+    if LK:
+        print("topkeys:", ",".join(LK))
 
 
 if __name__ == "__main__":
