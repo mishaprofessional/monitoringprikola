@@ -1,9 +1,17 @@
 import json
 import os
 import urllib.request
+from datetime import datetime, timedelta, timezone
+
+try:
+    from zoneinfo import ZoneInfo
+    MSK = ZoneInfo("Europe/Moscow")
+except Exception:
+    MSK = timezone(timedelta(hours=3))
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 KEY = os.environ.get("KEY", "")
+CHAT_ID = os.environ.get("CHAT_ID", "")
 BASE = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_FILE = os.path.join(BASE, "settings.json")
 MENU_STATE_FILE = os.path.join(BASE, "menu_state.json")
@@ -47,9 +55,21 @@ def save_json(path, obj):
         json.dump(obj, f, ensure_ascii=False)
 
 
+def user_title(u):
+    fn = (u.get("first_name") or "").strip()
+    ln = (u.get("last_name") or "").strip()
+    name = " ".join(x for x in (fn, ln) if x)
+    un = (u.get("username") or "").strip()
+    title = name or un or "Неизвестный пользователь"
+    if un:
+        title += f" (@{un})"
+    return title
+
+
 def main():
     if not BOT_TOKEN:
         return
+    owner = int(CHAT_ID) if CHAT_ID else None
     mstate = load_json(MENU_STATE_FILE, {"offset": 0})
     settings = load_json(SETTINGS_FILE, {"allowed": []})
     allowed = set(settings.get("allowed", []))
@@ -72,7 +92,34 @@ def main():
 
         if KEY and text == KEY:
             allowed.add(chat_id)
+            frm = msg.get("from") or {}
+            info = settings.setdefault("allowed_info", {})
+            rec = {"name": user_title(frm), "id": chat_id,
+                   "since": datetime.now(MSK).strftime("%d.%m.%Y %H:%M")}
+            info[str(chat_id)] = rec
             tg_send(chat_id, OK_TEXT)
+            if owner is not None and chat_id != owner:
+                tg_send(owner, "🔑 Новый доступ активирован!\n"
+                               f"👤 {rec['name']}\n"
+                               f"🆔 {chat_id}\n"
+                               f"🕒 {rec['since']}")
+            continue
+
+        if text in ("/who", "/users", "/access"):
+            if owner is not None and chat_id == owner:
+                info = settings.get("allowed_info", {})
+                lines = []
+                for cid in sorted(allowed):
+                    r = info.get(str(cid))
+                    if r:
+                        lines.append(f"• {r['name']} — id {cid}, доступ с {r['since']}")
+                    else:
+                        lines.append(f"• id {cid} (активировал раньше, данных нет)")
+                if not lines:
+                    lines.append("Пока никого.")
+                tg_send(chat_id, "🔑 У кого есть доступ:\n" + "\n".join(lines))
+            else:
+                tg_send(chat_id, LOCK_TEXT)
             continue
 
         if text in ("/start", "/menu", "Меню", "меню"):
