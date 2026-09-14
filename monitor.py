@@ -32,12 +32,13 @@ SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
 MAP_FILE = os.path.join(BASE_DIR, "map.png")
 FONT_FILE = os.path.join(BASE_DIR, "font.ttf")
 
-EXPIRE_HOURS = 3
+EXPIRE_HOURS = 2
 HOUSE_ID_SHIFT = -1
 MAX_LIST_IN_MSG = 60
 ANOMALY_LIMIT = 200
 FREE_KEYS = ("noOwner", "onMarketplace")
 MAP_BOUND = 3000.0
+CAPTION_LIMIT = 1024
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -123,10 +124,13 @@ def tg_send(chat_id, text):
         return json.loads(r.read().decode("utf-8"))
 
 
-def tg_send_photo(chat_id, path, caption):
+def tg_send_photo(chat_id, path, caption, parse_mode=None):
     boundary = "arzmapbound"
     body = b""
-    for k, v in (("chat_id", str(chat_id)), ("caption", caption)):
+    fields = [("chat_id", str(chat_id)), ("caption", caption)]
+    if parse_mode:
+        fields.append(("parse_mode", parse_mode))
+    for k, v in fields:
         body += f"--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n".encode("utf-8")
     with open(path, "rb") as f:
         data = f.read()
@@ -234,7 +238,6 @@ def build_map_image(houses, sid):
         f_lab = get_font(max(20, W // 30))
         f_head = get_font(max(16, W // 38))
         r_dot = max(4, W // 140)
-        stroke = max(2, W // 220)
         for h in houses:
             lx = h.get("lx", 0)
             ly = h.get("ly", 0)
@@ -242,13 +245,17 @@ def build_map_image(houses, sid):
             y = min(max((MAP_BOUND - ly) / (2 * MAP_BOUND) * H, 8), H - 8)
             d.ellipse([x - r_dot, y - r_dot, x + r_dot, y + r_dot], fill=(255, 30, 30))
             lab = str(display_id(h))
-            d.text((x + 8, y - 8), lab, fill=(255, 255, 255), font=f_lab,
-                   stroke_width=stroke, stroke_fill=(0, 0, 0), anchor="ls")
+            tw = int(d.textlength(lab, font=f_lab))
+            th = f_lab.size
+            tx, ty = x + 10, y - 14 - th
+            d.rectangle([tx - 6, ty - 4, tx + tw + 6, ty + th + 4], fill=(0, 0, 0))
+            d.text((tx, ty), lab, fill=(255, 255, 255), font=f_lab)
         head = f"[{sid:02d}] {SERVER_NAMES.get(sid, '')}"
-        tw = int(d.textlength(head, font=f_head))
-        th = f_head.size
-        d.rectangle([8, 8, 8 + tw + 16, 8 + th + 10], fill=(0, 0, 0))
-        d.text((16, 13), head, fill=(255, 255, 255), font=f_head)
+        tw2 = int(d.textlength(head, font=f_head))
+        th2 = f_head.size
+        d.rectangle([8, 8, 8 + tw2 + 16, 8 + th2 + 10], fill=(0, 0, 0))
+        d.text((16, 8 + (th2 + 10) / 2), head, fill=(255, 255, 255),
+               font=f_head, anchor="lm")
         path = os.path.join(tempfile.gettempdir(), "arz_map.png")
         base.save(path)
         return path
@@ -278,16 +285,17 @@ def notify(chats, sid, new_houses, now):
     text = (f"{header}\n\n{server_line}\n\n{times}\n\n"
             f"<pre>{escape(chr(10).join(block_lines))}</pre>")
     img = build_map_image(new_houses, sid)
+    combined = img is not None and len(text) <= CAPTION_LIMIT
     for chat in chats:
         try:
-            tg_send(chat, text)
+            if combined:
+                tg_send_photo(chat, img, text, parse_mode="HTML")
+            else:
+                tg_send(chat, text)
+                if img:
+                    tg_send_photo(chat, img, f"📍 Сервер [{sid:02d}] {name}: позиция дома")
         except Exception as e:
             print("Ошибка отправки:", e)
-        if img:
-            try:
-                tg_send_photo(chat, img, f"📍 Сервер [{sid:02d}] {name}: позиция дома")
-            except Exception as e:
-                print("Ошибка отправки фото:", e)
         time.sleep(1)
 
 
