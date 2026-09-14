@@ -22,12 +22,11 @@ SERVER_IDS = list(range(1, 34))
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")
 SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
 
-EXPIRE_HOURS = 2
-ROUND_UP_HOUR = True
-HOUSE_ID_SHIFT = -1
+EXPIRE_HOURS = 3        # слет = находка + N часов, минуты отбрасываются
+HOUSE_ID_SHIFT = -1     # номера домов на карте сдвинуты относительно id API
 MAX_LIST_IN_MSG = 60
 ANOMALY_LIMIT = 200
-FREE_KEYS = ("noOwner", "onMarketplace")
+FREE_KEYS = ("noOwner", "onMarketplace")   # только действительно свободные дома
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -142,10 +141,7 @@ def fetch_server_data(sid):
 
 
 def expire_time(now):
-    d = now + timedelta(hours=EXPIRE_HOURS)
-    if ROUND_UP_HOUR:
-        d = d.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-    return d
+    return (now + timedelta(hours=EXPIRE_HOURS)).replace(minute=0, second=0, microsecond=0)
 
 
 def load_state():
@@ -180,14 +176,14 @@ def notify(chats, sid, new_houses, now):
     shown = new_houses[:MAX_LIST_IN_MSG]
     header = f"🏛 Найдено имущество: {total}"
     server_line = f"🖥 Сервер: [{sid:02d}]" + (f" {name}" if name else "")
-    times = (f"⚪ Найдено: {now.strftime('%d.%m %H:%M')}\n"
-             f"⌛ Слет: {deadline.strftime('%d.%m %H:%M')}")
-    block_lines = [f"🏠 Дома · {total}"]
+    times = (f"🕒 Найдено: {now.strftime('%d.%m %H:%M')}\n"
+             f"⏳ Слет: {deadline.strftime('%d.%m %H:%M')}")
+    block_lines = [f"🏠 ДОМА ({total})"]
     for h in shown:
-        line = f"#{display_id(h)} Дом"
+        line = f"#{display_id(h)}"
         title = (h.get("name") or "").strip()
         if title:
-            line += f" · {title}"
+            line += f" - {title}"
         block_lines.append(line)
     if total > len(shown):
         block_lines.append(f"… и ещё {total - len(shown)}")
