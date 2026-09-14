@@ -22,7 +22,7 @@ except Exception:
 
 R = lambda s: s[::-1]
 SRC = R("pam/ipa/moc.pr-anozira.ipa-n//:sptth")
-SRCS = R("anozira/srevres/moc.pr-anozira.ipa-n//:sptth")
+SRCS = R("anozira/srevres/ipa/moc.pr-anozira.ipa-n//:sptth")
 TOKEN = os.environ.get("BOT_TOKEN", "")
 CHAT = os.environ.get("CHAT_ID", "")
 IDS = list(range(1, 34))
@@ -231,8 +231,8 @@ def bm(houses, sid):
                 d0.ellipse([256 - r, 256 - r, 256 + r, 256 + r], outline=(28, 32, 40))
         d = ImageDraw.Draw(base)
         W, H = base.size
-        f_lab = gf(max(20, W // 30))
-        f_head = gf(max(16, W // 38))
+        f_head = gf(max(14, W // 44))
+        f_lab = gf(max(12, W // 50))
         r_dot = max(4, W // 140)
         for h in houses:
             lx = h.get("lx", 0)
@@ -243,15 +243,17 @@ def bm(houses, sid):
             lab = str(di(h))
             tw = int(d.textlength(lab, font=f_lab))
             th = f_lab.size
-            tx, ty = x + 10, y - 14 - th
-            d.rectangle([tx - 6, ty - 4, tx + tw + 6, ty + th + 4], fill=(0, 0, 0))
-            d.text((tx, ty), lab, fill=(255, 255, 255), font=f_lab)
+            bx0 = min(max(x + 8, 4), W - tw - 16)
+            by0 = min(max(y - 10 - (th + 8), 4), H - th - 12)
+            d.rectangle([bx0, by0, bx0 + tw + 12, by0 + th + 8], fill=(0, 0, 0))
+            d.text((bx0 + (tw + 12) / 2, by0 + (th + 8) / 2), lab,
+                   fill=(255, 255, 255), font=f_lab, anchor="mm")
         head = f"[{sid:02d}] {NM.get(sid, '')}"
         tw2 = int(d.textlength(head, font=f_head))
         th2 = f_head.size
         d.rectangle([8, 8, 8 + tw2 + 16, 8 + th2 + 10], fill=(0, 0, 0))
-        d.text((16, 8 + (th2 + 10) / 2), head, fill=(255, 255, 255),
-               font=f_head, anchor="lm")
+        d.text((8 + (tw2 + 16) / 2, 8 + (th2 + 10) / 2), head,
+               fill=(255, 255, 255), font=f_head, anchor="mm")
         path = os.path.join(tempfile.gettempdir(), "i.png")
         base.save(path)
         return path
