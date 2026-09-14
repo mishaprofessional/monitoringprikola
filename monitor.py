@@ -1,32 +1,14 @@
 import json
 import os
-import sys
-import time
-import urllib.error
 import urllib.request
-from datetime import datetime, timedelta, timezone
-from html import escape
-
-try:
-    from zoneinfo import ZoneInfo
-    MSK = ZoneInfo("Europe/Moscow")
-except Exception:
-    MSK = timezone(timedelta(hours=3))
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 CHAT_ID = os.environ.get("CHAT_ID", "")
-
-API_URL = "https://n-api.arizona-rp.com/api/map"
 SERVERS_URL = "https://n-api.arizona-rp.com/api/servers/arizona"
 SERVER_IDS = list(range(1, 34))
-STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")
-
-EXPIRE_HOURS = 2        # слет = находка + N часов
-ROUND_UP_HOUR = True    # округлять слет вверх до часа (как в образце)
-HOUSE_ID_SHIFT = -1     # номера домов на карте сдвинуты относительно id API
-MAX_LIST_IN_MSG = 60    # максимум домов в одной карточке
-ANOMALY_LIMIT = 200     # больше сразу = подозрение на глюк API, молча переснять
-FREE_KEYS = ("noOwner", "onMarketplace")   # списки свободных домов в ответе API
+BASE = os.path.dirname(os.path.abspath(__file__))
+SETTINGS_FILE = os.path.join(BASE, "settings.json")
+MENU_STATE_FILE = os.path.join(BASE, "menu_state.json")
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -36,160 +18,188 @@ HEADERS = {
     "Origin": "https://arizona-rp.com",
 }
 
-SERVER_NAMES = {}
 
-
-def http_get_json(url, timeout=30):
-    req = urllib.request.Request(url, headers=HEADERS)
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode("utf-8"))
-
-
-def tg_send(text):
-    payload = json.dumps({"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}).encode("utf-8")
+def tg(method, payload):
+    data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
-        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-        data=payload,
+        f"https://api.telegram.org/bot{BOT_TOKEN}/{method}",
+        data=data,
         headers={"Content-Type": "application/json"},
     )
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.loads(r.read().decode("utf-8"))
 
 
-def load_server_names():
-    global SERVER_NAMES
+def load_json(path, default):
     try:
-        data = http_get_json(SERVERS_URL)
-        items = data if isinstance(data, list) else data.get("servers", data.get("items", []))
-        for it in items:
-            if not isinstance(it, dict):
-                continue
-            sid = it.get("serverId") or it.get("id")
-            name = (it.get("name") or it.get("fullName") or "").strip()
-            if sid is not None and name:
-                SERVER_NAMES[int(sid)] = name
-    except Exception as e:
-        print("Список серверов не получен:", e)
-
-
-def fetch_server_data(sid):
-    """Возвращает {"free": [записи свободных домов], "occupied": N} или None."""
-    try:
-        data = http_get_json(f"{API_URL}/{sid}")
-    except urllib.error.HTTPError as e:
-        print(f"server {sid}: HTTP {e.code}")
-        return None
-    except Exception as e:
-        print(f"server {sid}: error {e}")
-        return None
-
-    houses = data.get("houses") if isinstance(data, dict) else None
-    if not isinstance(houses, dict):
-        return {"free": [], "occupied": 0}
-
-    free = []
-    for key in FREE_KEYS:
-        lst = houses.get(key)
-        if isinstance(lst, list):
-            free.extend(h for h in lst if isinstance(h, dict))
-    lst = houses.get("hasOwner")
-    if isinstance(lst, list):
-        free.extend(h for h in lst if isinstance(h, dict) and not (h.get("owner") or "").strip())
-        occupied = len(lst)
-    else:
-        occupied = 0
-    return {"free": free, "occupied": occupied}
-
-
-def expire_time(now):
-    d = now + timedelta(hours=EXPIRE_HOURS)
-    if ROUND_UP_HOUR:
-        d = d.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-    return d
-
-
-def load_state():
-    try:
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
+    except Exception:
+        return default
+
+
+def save_json(path, obj):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False)
+
+
+def server_names():
+    try:
+        req = urllib.request.Request(SERVERS_URL, headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=30) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        items = data if isinstance(data, list) else data.get("servers", data.get("items", []))
+        out = {}
+        for it in items:
+            sid = it.get("serverId") or it.get("id")
+            name = (it.get("name") or "").strip()
+            if sid is not None and name:
+                out[int(sid)] = name
+        return out
+    except Exception:
         return {}
 
 
-def save_state(state):
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False)
+def is_sub(settings, sid):
+    sub = settings.get("servers")
+    return sub is None or sid in sub
 
 
-def display_id(h):
-    return h.get("id", 0) + HOUSE_ID_SHIFT
+def cur_text(settings, names):
+    sub = settings.get("servers")
+    if sub is None:
+        return "все 33 сервера"
+    if not sub:
+        return "ничего не выбрано"
+    return ", ".join(f"{s:02d} {names.get(s, '')}".strip() for s in sorted(sub))
 
 
-def notify(sid, new_houses, now):
-    deadline = expire_time(now)
-    name = SERVER_NAMES.get(sid, "")
-    total = len(new_houses)
-    shown = new_houses[:MAX_LIST_IN_MSG]
-    header = f"🏛 Найдено имущество: {total}"
-    server_line = f"🖥 Сервер: [{sid:02d}]" + (f" {name}" if name else "")
-    times = (f"⚪ Найдено: {now.strftime('%d.%m %H:%M')}\n"
-             f"⌛ Слет: {deadline.strftime('%d.%m %H:%M')}")
-    block_lines = [f"🏠 Дома · {total}"]
-    for h in shown:
-        line = f"#{display_id(h)} Дом"
-        title = (h.get("name") or "").strip()
-        if title:
-            line += f" · {title}"
-        block_lines.append(line)
-    if total > len(shown):
-        block_lines.append(f"… и ещё {total - len(shown)}")
-    text = (f"{header}\n\n{server_line}\n\n{times}\n\n"
-            f"<pre>{escape(chr(10).join(block_lines))}</pre>")
-    try:
-        tg_send(text)
-    except Exception as e:
-        print("Ошибка отправки в Telegram:", e)
+def main_text():
+    return "👋 Привет, охотник за имуществом!\n\nВыбери нужный раздел ниже."
+
+
+def main_kb():
+    return {"inline_keyboard": [
+        [{"text": "🔍 Найти имущество", "callback_data": "find"}],
+    ]}
+
+
+def sel_text(settings, names):
+    return ("🖥 Выбери серверы, о слётах домов на которых хочешь получать уведомления:\n\n"
+            "✅ — уведомления приходят\n"
+            "⬜️ — выключено\n\n"
+            f"Сейчас подписка: {cur_text(settings, names)}\n\n"
+            "Когда закончишь — жми «✅ Готово».")
+
+
+def sel_kb(settings, names):
+    rows, row = [], []
+    for sid in SERVER_IDS:
+        mark = "✅" if is_sub(settings, sid) else "⬜️"
+        nm = names.get(sid, f"Сервер {sid}")[:12]
+        row.append({"text": f"{mark} {sid:02d} {nm}", "callback_data": f"t:{sid}"})
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([{"text": "✅ Готово", "callback_data": "done"}])
+    rows.append([{"text": "← Назад", "callback_data": "back"}])
+    return {"inline_keyboard": rows}
+
+
+def confirm_text(settings, names):
+    return ("✅ Отлично! Настройки сохранены.\n\n"
+            f"Ты подписан на: {cur_text(settings, names)}.\n"
+            "Если что-то слетит на выбранных серверах — бот сразу же тебя оповестит! 🏠🔔")
 
 
 def main():
     if not BOT_TOKEN or not CHAT_ID:
-        print("Не заданы BOT_TOKEN / CHAT_ID в Secrets")
-        sys.exit(1)
+        return
+    chat_id = int(CHAT_ID)
+    mstate = load_json(MENU_STATE_FILE, {"offset": 0})
+    settings = load_json(SETTINGS_FILE, {"servers": None})
+    names = server_names()
 
-    load_server_names()
-    state = load_state()
-    ok = 0
+    try:
+        resp = tg("getUpdates", {"offset": mstate.get("offset", 0), "timeout": 5,
+                                 "allowed_updates": ["message", "callback_query"]})
+    except Exception as e:
+        print("getUpdates error:", e)
+        return
+    updates = resp.get("result", [])
 
-    for sid in SERVER_IDS:
-        d = None
-        for _ in range(3):
-            d = fetch_server_data(sid)
-            if d is not None:
-                break
-            time.sleep(2)
-        if d is None:
+    for u in updates:
+        mstate["offset"] = max(mstate.get("offset", 0), u["update_id"] + 1)
+        cb = u.get("callback_query")
+        if cb:
+            if (cb.get("from") or {}).get("id") != chat_id:
+                continue
+            data = cb.get("data", "")
+            mid = (cb.get("message") or {}).get("message_id")
+            try:
+                tg("answerCallbackQuery", {"callback_query_id": cb.get("id")})
+            except Exception:
+                pass
+
+            if data == "find":
+                try:
+                    tg("editMessageText", {"chat_id": chat_id, "message_id": mid,
+                                           "text": sel_text(settings, names),
+                                           "reply_markup": sel_kb(settings, names)})
+                except Exception as e:
+                    print("edit error:", e)
+            elif data == "back":
+                try:
+                    tg("editMessageText", {"chat_id": chat_id, "message_id": mid,
+                                           "text": main_text(), "reply_markup": main_kb()})
+                except Exception as e:
+                    print("edit error:", e)
+            elif data.startswith("t:"):
+                sid = int(data[2:])
+                sub = settings.get("servers")
+                if sub is None:
+                    sub = list(SERVER_IDS)
+                if sid in sub:
+                    sub.remove(sid)
+                else:
+                    sub.append(sid)
+                settings["servers"] = sorted(sub)
+                try:
+                    tg("editMessageText", {"chat_id": chat_id, "message_id": mid,
+                                           "text": sel_text(settings, names),
+                                           "reply_markup": sel_kb(settings, names)})
+                except Exception as e:
+                    print("edit error:", e)
+            elif data == "done":
+                try:
+                    tg("editMessageText", {"chat_id": chat_id, "message_id": mid,
+                                           "text": "✅ Выбор сохранён."})
+                except Exception:
+                    pass
+                try:
+                    tg("sendMessage", {"chat_id": chat_id,
+                                       "text": confirm_text(settings, names),
+                                       "reply_markup": main_kb()})
+                except Exception as e:
+                    print("send error:", e)
             continue
-        ok += 1
 
-        free_map = {h["id"]: h for h in d["free"]}
-        free_ids = sorted(free_map)
+        msg = u.get("message") or {}
+        if msg.get("chat", {}).get("id") != chat_id:
+            continue
+        text = (msg.get("text") or "").strip()
+        if text in ("/start", "/menu", "/settings", "Меню", "меню"):
+            try:
+                tg("sendMessage", {"chat_id": chat_id, "text": main_text(),
+                                   "reply_markup": main_kb()})
+            except Exception as e:
+                print("send error:", e)
 
-        prev = state.get(str(sid))
-        prev_free = set(prev.get("free", [])) if prev and prev.get("init") else set()
-        new_ids = [i for i in free_ids if i not in prev_free]
-
-        if len(new_ids) > ANOMALY_LIMIT:
-            print(f"server {sid}: аномалия ({len(new_ids)}), переснимаю молча")
-        elif new_ids:
-            print(f"server {sid}: новые свободные {[display_id(free_map[i]) for i in new_ids]}")
-            notify(sid, [free_map[i] for i in new_ids], datetime.now(MSK))
-            time.sleep(1)
-
-        print(f"server {sid}: занятых {d['occupied']}, свободных {len(free_ids)}")
-        state[str(sid)] = {"init": True, "free": free_ids}
-
-    save_state(state)
-    print(f"Готово. Серверов отвечают: {ok}/{len(SERVER_IDS)}")
+    save_json(SETTINGS_FILE, settings)
+    save_json(MENU_STATE_FILE, mstate)
+    print("menu ok, updates:", len(updates))
 
 
 if __name__ == "__main__":
