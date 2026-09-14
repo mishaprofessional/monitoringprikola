@@ -15,7 +15,7 @@ except Exception:
     MSK = timezone(timedelta(hours=3))
 
 try:
-    from PIL import Image, ImageDraw
+    from PIL import Image, ImageDraw, ImageFont
     HAS_PIL = True
 except Exception:
     HAS_PIL = False
@@ -30,6 +30,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(BASE_DIR, "state.json")
 SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
 MAP_FILE = os.path.join(BASE_DIR, "map.png")
+FONT_FILE = os.path.join(BASE_DIR, "font.ttf")
 
 EXPIRE_HOURS = 3
 HOUSE_ID_SHIFT = -1
@@ -198,6 +199,20 @@ def display_id(h):
     return h.get("id", 0) + HOUSE_ID_SHIFT
 
 
+def get_font(size):
+    paths = []
+    if os.path.exists(FONT_FILE):
+        paths.append(FONT_FILE)
+    paths += ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+              "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf"]
+    for p in paths:
+        try:
+            return ImageFont.truetype(p, size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
 def build_map_image(houses, sid):
     if not HAS_PIL:
         return None
@@ -216,19 +231,24 @@ def build_map_image(houses, sid):
                 d0.ellipse([256 - r, 256 - r, 256 + r, 256 + r], outline=(28, 32, 40))
         d = ImageDraw.Draw(base)
         W, H = base.size
+        f_lab = get_font(max(20, W // 30))
+        f_head = get_font(max(16, W // 38))
+        r_dot = max(4, W // 140)
+        stroke = max(2, W // 220)
         for h in houses:
             lx = h.get("lx", 0)
             ly = h.get("ly", 0)
             x = min(max((lx + MAP_BOUND) / (2 * MAP_BOUND) * W, 8), W - 8)
             y = min(max((MAP_BOUND - ly) / (2 * MAP_BOUND) * H, 8), H - 8)
-            d.ellipse([x - 10, y - 10, x + 10, y + 10], outline=(255, 40, 40), width=3)
-            d.ellipse([x - 3, y - 3, x + 3, y + 3], fill=(255, 40, 40))
-            lab = f"#{display_id(h)}"
-            d.rectangle([x + 12, y - 26, x + 12 + 7 * len(lab) + 6, y - 8], fill=(0, 0, 0))
-            d.text((x + 15, y - 24), lab, fill=(255, 255, 255))
+            d.ellipse([x - r_dot, y - r_dot, x + r_dot, y + r_dot], fill=(255, 30, 30))
+            lab = str(display_id(h))
+            d.text((x + 8, y - 8), lab, fill=(255, 255, 255), font=f_lab,
+                   stroke_width=stroke, stroke_fill=(0, 0, 0), anchor="ls")
         head = f"[{sid:02d}] {SERVER_NAMES.get(sid, '')}"
-        d.rectangle([6, 6, 6 + 7 * len(head) + 8, 26], fill=(0, 0, 0))
-        d.text((10, 9), head, fill=(255, 255, 255))
+        tw = int(d.textlength(head, font=f_head))
+        th = f_head.size
+        d.rectangle([8, 8, 8 + tw + 16, 8 + th + 10], fill=(0, 0, 0))
+        d.text((16, 13), head, fill=(255, 255, 255), font=f_head)
         path = os.path.join(tempfile.gettempdir(), "arz_map.png")
         base.save(path)
         return path
