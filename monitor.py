@@ -281,7 +281,7 @@ def bm(items, sid, kind):
         W, H = base.size
         f_head = gf(max(14, W // 44))
         f_lab = gf(max(14, W // 40))
-        r_dot = max(5, W // 120)
+        r_dot = max(6, W // 100)
         col = (255, 30, 30) if kind == "h" else (60, 220, 90)
         for it in items:
             lx = it.get("lx", 0)
@@ -299,8 +299,8 @@ def bm(items, sid, kind):
                 lab = nm if len(nm) <= 16 else nm[:15] + "…"
             tw = int(d.textlength(lab, font=f_lab))
             th = f_lab.size
-            bx0 = min(max(x + r_dot + 3, 4), W - tw - 10)
-            by0 = min(max(y - r_dot - 4 - (th + 2), 4), H - th - 6)
+            bx0 = min(max(x + r_dot + 2, 4), W - tw - 10)
+            by0 = min(max(y - r_dot - 2 - (th + 2), 4), H - th - 6)
             d.rectangle([bx0, by0, bx0 + tw + 6, by0 + th + 2], fill=(0, 0, 0))
             d.text((bx0 + (tw + 6) / 2, by0 + (th + 2) / 2), lab,
                    fill=(255, 255, 255), font=f_lab, anchor="mm")
