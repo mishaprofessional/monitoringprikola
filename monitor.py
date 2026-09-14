@@ -340,7 +340,7 @@ def ct(sid, items, now, kind):
         head = ("🏦 Найден бизнес" if total == 1 else "🏬 Найдено несколько бизнесов").upper()
         block = [f"💼 БИЗНЕСЫ (Количество: {total})"]
         for it in shown:
-            t = (it.get("name") or "").strip() or f"#{it.get('id", 0)}"
+            t = (it.get("name") or "").strip() or f"#{it.get('id', 0)}"
             block.append(t)
     if total > len(shown):
         block.append(f"… и ещё {total - len(shown)}")
@@ -349,7 +349,7 @@ def ct(sid, items, now, kind):
     d1 = now.strftime("%d.%m.%Y")
     t2 = deadline.strftime("%H:%M")
     d2 = deadline.strftime("%d.%m.%Y")
-    q = "<blockquote color=\"CLRPH\"> "
+    q = "<blockquote color=\"CLRPH\">"
     text = (f"{q}<code>{escape(head)}</code></blockquote>\n"
             f"{q}<code>Сервер:</code> <b>{escape(srv)}</b></blockquote>\n"
             f"{q}<code>Обнаружено:</code> <b>{t1}</b> <tg-spoiler>{d1}</tg-spoiler>\n"
