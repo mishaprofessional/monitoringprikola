@@ -1,0 +1,36 @@
+name: menu
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  menu:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run menu
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python -u menu.py
+
+      - name: Commit settings
+        run: |
+          git config user.name "arz-bot"
+          git config user.email "arz-bot@users.noreply.github.com"
+          git add settings.json menu_state.json
+          if ! git diff --cached --quiet; then
+            git commit -m "menu update"
+            git pull --rebase || true
+            git push
+          fi
