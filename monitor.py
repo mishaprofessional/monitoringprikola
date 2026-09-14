@@ -349,9 +349,9 @@ def ct(sid, items, now, kind):
     t2 = deadline.strftime("%H:%M")
     d2 = deadline.strftime("%d.%m.%Y")
     text = (f"<blockquote><code>{escape(head)}</code></blockquote>\n"
-            f"<blockquote><code>Сервер: <b>{escape(srv)}</b></code></blockquote>\n"
-            f"<blockquote><code>Обнаружено: <b>{t1}</b> <tg-spoiler>{d1}</tg-spoiler>\n"
-            f"Слет: <b>{t2}</b> <tg-spoiler>{d2}</tg-spoiler></code></blockquote>\n"
+            f"<blockquote><code>Сервер:</code> <b>{escape(srv)}</b></blockquote>\n"
+            f"<blockquote><code>Обнаружено:</code> <b>{t1}</b> <tg-spoiler>{d1}</tg-spoiler>\n"
+            f"<code>Слет:</code> <b>{t2}</b> <tg-spoiler>{d2}</tg-spoiler></blockquote>\n"
             f"<pre>{escape(chr(10).join(block))}</pre>")
     return text.replace("0", "<b>O</b>")
 
