@@ -38,6 +38,7 @@ AL = 200
 FK = ("noOwner", "onMarketplace")
 MB = 3000.0
 CL = 1024
+BL = ("нефтевышка",)
 HD = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
@@ -156,8 +157,12 @@ def wb(o, out):
 
 
 def is_free_biz(b):
+    nm = (b.get("name") or "").strip().lower()
+    for bad in BL:
+        if bad in nm:
+            return False
     o = (b.get("owner") or "").strip().lower()
-    return o == "" or "state" in o or "нет" in o
+    return o == "" or "state" in o
 
 
 def fd(sid):
