@@ -161,6 +161,10 @@ def is_free_biz(b):
     for bad in BL:
         if bad in nm:
             return False
+    if (b.get("hasAuction") or 0) == 1:
+        return False
+    if (b.get("auTimeEnd") or 0) > 0:
+        return False
     o = (b.get("owner") or "").strip().lower()
     return o == "" or "state" in o
 
