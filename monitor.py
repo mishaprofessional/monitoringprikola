@@ -145,7 +145,7 @@ def pp(chat_id, path, caption, parse_mode=None):
 
 def wb(o, out):
     if isinstance(o, dict):
-        if "lx" in o and "owner" in o and "type" in o:
+        if "lx" in o and "owner" in o:
             out.append(o)
         else:
             for v in o.values():
@@ -153,6 +153,11 @@ def wb(o, out):
     elif isinstance(o, list):
         for v in o:
             wb(v, out)
+
+
+def is_free_biz(b):
+    o = (b.get("owner") or "").strip().lower()
+    return o == "" or "state" in o or "нет" in o
 
 
 def fd(sid):
@@ -166,8 +171,21 @@ def fd(sid):
         print(f"{sid}: {e}")
         return None
 
-    if isinstance(data, dict) and not LK:
-        LK = list(data.keys())
+    if isinstance(data, dict):
+        if not LK:
+            LK = list(data.keys())
+        if sid == IDS[0]:
+            bs = data.get("businesses") or {}
+            parts = []
+            for k, v in bs.items():
+                parts.append(f"{k}:{len(v) if isinstance(v, (list, dict)) else -1}")
+            print("bizstruct:", ",".join(parts))
+            na = bs.get("noAuction")
+            if isinstance(na, dict) and na:
+                k0 = next(iter(na))
+                print("bizsample:", json.dumps({k0: na[k0]}, ensure_ascii=False)[:300])
+            elif isinstance(na, list) and na:
+                print("bizsample:", json.dumps(na[0], ensure_ascii=False)[:300])
 
     houses = data.get("houses") if isinstance(data, dict) else None
     if not isinstance(houses, dict):
@@ -186,9 +204,8 @@ def fd(sid):
         occupied = 0
 
     biz_all = []
-    wb(data, biz_all)
-    biz = [b for b in biz_all if isinstance(b, dict) and "id" in b
-           and not (b.get("owner") or "").strip()]
+    wb(data.get("businesses"), biz_all)
+    biz = [b for b in biz_all if isinstance(b, dict) and "id" in b and is_free_biz(b)]
     return {"free": free, "biz": biz, "occupied": occupied}
 
 
@@ -255,7 +272,7 @@ def bm(items, sid, kind):
         W, H = base.size
         f_head = gf(max(14, W // 44))
         f_lab = gf(max(14, W // 40))
-        r_dot = max(4, W // 150)
+        r_dot = max(5, W // 120)
         col = (255, 30, 30) if kind == "h" else (60, 220, 90)
         for it in items:
             lx = it.get("lx", 0)
@@ -273,8 +290,8 @@ def bm(items, sid, kind):
                 lab = nm if len(nm) <= 16 else nm[:15] + "…"
             tw = int(d.textlength(lab, font=f_lab))
             th = f_lab.size
-            bx0 = min(max(x + 8, 4), W - tw - 10)
-            by0 = min(max(y - 10 - (th + 2), 4), H - th - 6)
+            bx0 = min(max(x + r_dot + 3, 4), W - tw - 10)
+            by0 = min(max(y - r_dot - 4 - (th + 2), 4), H - th - 6)
             d.rectangle([bx0, by0, bx0 + tw + 6, by0 + th + 2], fill=(0, 0, 0))
             d.text((bx0 + (tw + 6) / 2, by0 + (th + 2) / 2), lab,
                    fill=(255, 255, 255), font=f_lab, anchor="mm")
