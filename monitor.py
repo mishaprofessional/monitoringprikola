@@ -156,17 +156,19 @@ def wb(o, out):
             wb(v, out)
 
 
+def on_auction(x):
+    return (x.get("hasAuction") or 0) == 1 or (x.get("auTimeEnd") or 0) > 0
+
+
 def is_free_biz(b):
     nm = (b.get("name") or "").strip().lower()
     for bad in BL:
         if bad in nm:
             return False
-    if (b.get("hasAuction") or 0) == 1:
-        return False
-    if (b.get("auTimeEnd") or 0) > 0:
+    if on_auction(b):
         return False
     o = (b.get("owner") or "").strip().lower()
-    return o == "" or "state" in o
+    return o == "" or o == "the state"
 
 
 def fd(sid):
@@ -211,6 +213,7 @@ def fd(sid):
         occupied = len(lst)
     else:
         occupied = 0
+    free = [h for h in free if not on_auction(h)]
 
     biz_all = []
     wb(data.get("businesses"), biz_all)
