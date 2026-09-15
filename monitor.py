@@ -40,6 +40,7 @@ MB = 3000.0
 CL = 1024
 BL = ("нефтевышка",)
 QCOLOR = "7856F0"
+WM = "@beautifultragedy_bot"
 HD = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
@@ -285,6 +286,7 @@ def bm(items, sid, kind):
         W, H = base.size
         f_head = gf(max(14, W // 44))
         f_lab = gf(max(14, W // 40))
+        f_wm = gf(max(10, W // 56))
         r_dot = max(6, W // 100)
         col = (255, 30, 30) if kind == "h" else (60, 220, 90)
         for it in items:
@@ -303,8 +305,8 @@ def bm(items, sid, kind):
                 lab = nm if len(nm) <= 16 else nm[:15] + "…"
             tw = int(d.textlength(lab, font=f_lab))
             th = f_lab.size
-            bx0 = min(max(x + r_dot, 4), W - tw - 10)
-            by0 = min(max(y - r_dot - (th + 2), 4), H - th - 6)
+            bx0 = min(max(x + r_dot - 4, 4), W - tw - 10)
+            by0 = min(max(y - r_dot - (th + 2) + 4, 4), H - th - 6)
             d.rectangle([bx0, by0, bx0 + tw + 6, by0 + th + 2], fill=(0, 0, 0))
             d.text((bx0 + (tw + 6) / 2, by0 + (th + 2) / 2), lab,
                    fill=(255, 255, 255), font=f_lab, anchor="mm")
@@ -314,6 +316,12 @@ def bm(items, sid, kind):
         d.rectangle([8, 8, 8 + tw2 + 16, 8 + th2 + 10], fill=(0, 0, 0))
         d.text((8 + (tw2 + 16) / 2, 8 + (th2 + 10) / 2), head,
                fill=(255, 255, 255), font=f_head, anchor="mm")
+        wx, wy = 8, H - f_wm.size - 10
+        for ox in (-1, 0, 1):
+            for oy in (-1, 0, 1):
+                if ox or oy:
+                    d.text((wx + ox, wy + oy), WM, fill=(0, 0, 0), font=f_wm)
+        d.text((wx, wy), WM, fill=(255, 255, 255), font=f_wm)
         path = os.path.join(tempfile.gettempdir(), "i.png")
         base.save(path)
         return path
@@ -329,7 +337,7 @@ def ct(sid, items, now, kind):
     shown = items[:ML]
     if kind == "h":
         head = ("🏠 Найден дом" if total == 1 else "🏘 Найдено несколько домов").upper()
-        block = [f"🏠 ДОМА (Количество: {total})"]
+        block = ["🏠 ДОМ" if total == 1 else f"🏠 ДОМА (Количество: {total})"]
         for it in shown:
             line = f"#{di(it)}"
             t = (it.get("name") or "").strip()
@@ -338,7 +346,7 @@ def ct(sid, items, now, kind):
             block.append(line)
     else:
         head = ("🏦 Найден бизнес" if total == 1 else "🏬 Найдено несколько бизнесов").upper()
-        block = [f"💼 БИЗНЕСЫ (Количество: {total})"]
+        block = ["💼 БИЗНЕС" if total == 1 else f"💼 БИЗНЕСЫ (Количество: {total})"]
         for it in shown:
             t = (it.get("name") or "").strip() or f"#{it.get('id', 0)}"
             block.append(t)
