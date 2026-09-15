@@ -107,10 +107,14 @@ def pn(data):
 
 def lsn():
     global NM
-    try:
-        NM = pn(gj(SRCS))
-    except Exception as e:
-        print("names:", e)
+    for _ in range(3):
+        try:
+            NM = pn(gj(SRCS))
+            if NM:
+                return
+        except Exception as e:
+            print("names:", e)
+        time.sleep(2)
 
 
 def ps(chat_id, text):
@@ -316,11 +320,9 @@ def bm(items, sid, kind):
         d.rectangle([8, 8, 8 + tw2 + 16, 8 + th2 + 10], fill=(0, 0, 0))
         d.text((8 + (tw2 + 16) / 2, 8 + (th2 + 10) / 2), head,
                fill=(255, 255, 255), font=f_head, anchor="mm")
+        twm = int(d.textlength(WM, font=f_wm))
         wx, wy = 8, H - f_wm.size - 10
-        for ox in (-1, 0, 1):
-            for oy in (-1, 0, 1):
-                if ox or oy:
-                    d.text((wx + ox, wy + oy), WM, fill=(0, 0, 0), font=f_wm)
+        d.rectangle([wx - 6, wy - 4, wx + twm + 6, wy + f_wm.size + 4], fill=(0, 0, 0))
         d.text((wx, wy), WM, fill=(255, 255, 255), font=f_wm)
         path = os.path.join(tempfile.gettempdir(), "i.png")
         base.save(path)
